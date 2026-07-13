@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+gharchive_sample.json.gz
+hindi_wiki_sample.json
+*.log

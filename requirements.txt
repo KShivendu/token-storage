@@ -1,0 +1,14 @@
+numpy
+tiktoken
+transformers
+tokenizers
+datasets
+constriction
+zstandard
+lz4
+brotli
+pyfastpfor
+msgpack
+
+# optional, only needed for 05_bigram/expA_bigram.py (remote Modal run)
+modal
