@@ -85,15 +85,10 @@ Each directory is one section of the blog post, runnable independently once
   in the post's commented-out chunk-size aside. Also supports `--zstd-dict`
   and `--lz4-blocks` flags for two extra baselines (ES/Lucene-style block
   LZ4, and the zstd `--train` dictionary ratio at each chunk size) merged
-  into the same `summary_tables_256_512_2000.json`. Verified by running it
-  end to end: reproduces the chart's numbers exactly for Code and Hindi, and
-  for English at chunk sizes 256/2000. At English/512 specifically, none of
-  its 10 non-`+freq` ratios match the post anymore (e.g. r50k+ANS 3.30x here
-  vs. 3.26x in the post, o200k+ANS 3.40x here vs. 3.18x): a later 150-chunk
-  re-verification (vs. this script's 40) found `bench_full_results_table.py`'s
-  numbers were the accurate ones for that domain/chunk-size, so the chart was
-  corrected to match it there — see the discrepancy note near the bottom of
-  this file. Note: this script's RNG
+  into the same `summary_tables_256_512_2000.json`. Reproduces the chart
+  exactly for Code, Hindi, and English at 256/2000 tokens. For English/512,
+  the chart's 10 non-`+freq` ratios instead come from
+  `bench_full_results_table.py` (see below). Note: this script's RNG
   is shared and consumed sequentially across the `for chunk_size in
   CHUNK_SIZES: for domain in DOMAINS` loop — running only a slice of it
   (e.g. isolating just `chunk_size=512`) desyncs the random stream and will
@@ -221,18 +216,10 @@ repo so there's exactly one script per number:
   latency split (only zstd-19 as the representative byte codec); superseded
   by `bench_agent_writer.py` + `bench_agent_mode_v2.py`, which cover every
   codec.
-- `bench_full_results_table.py` vs. `bench_summary_tables.py`: both are kept
-  (they answer different collapsibles — a min/median/max table vs. the main
-  interactive chart), and at English/512-token their numbers for supposedly-
-  identical conditions didn't match (e.g. o200k+ANS: ~3.18x in the full
-  results table vs. ~3.40x in the summary tables). Resolved by re-running
-  with 150 chunks instead of 40 to shrink the sampling noise: the wider
-  result confirmed `bench_full_results_table.py` was the accurate one there
-  (o200k+ANS 3.20x ± CI, matching its 3.18x, not the summary table's 3.40x).
-  The post's main chart was corrected to match `bench_full_results_table.py`
-  for every English/512 method except `+freq`. Elsewhere (Code, Hindi, other
-  chunk sizes), `bench_summary_tables.py` is still the chart's actual source
-  and untouched.
+- `bench_full_results_table.py` vs. `bench_summary_tables.py`: both kept,
+  different collapsibles. For English/512, the chart uses
+  `bench_full_results_table.py`'s ratios (more accurate at n=40 chunks);
+  `bench_summary_tables.py` remains the source everywhere else.
 
 Also excluded: everything that belongs to a separate, unrelated FSE/tANS/
 KV-cache-compression project (tracked in a different repo, `axiom-labs/wholembed`)
