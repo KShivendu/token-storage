@@ -22,8 +22,11 @@ Unless a script says otherwise:
   see `bench_summary_tables.py`).
 - **40 sampled test chunks** per domain, drawn from a held-out test split that
   the training-side frequency/dictionary tables never see.
-- **RNG seed 3344** (some earlier/exploratory scripts used seed 9012; every
-  script that feeds a number actually in the post uses 3344).
+- **RNG seed 3344** for most scripts. Exception: `bench_summary_tables.py`
+  and `bench_freqremap.py` use seed **9012** — different seed, same
+  methodology (40 held-out test chunks, train/test split never mixed). Both
+  seeds are real seeds used to produce numbers that are actually in the post;
+  there isn't a single universal seed across the whole repo.
 - **Bootstrap confidence intervals** (2000 resamples, 90% CI) around the
   median for ratio/latency claims, so a single unlucky chunk can't swing a
   reported number.
@@ -76,12 +79,28 @@ Each directory is one section of the blog post, runnable independently once
 ### `01_storage_efficiency/` — the main benchmark chart + full results table
 
 - `bench_summary_tables.py` — the interactive chart's `ratioValues`/latency
-  numbers, swept across all **three chunk sizes (256/512/2000 tokens)** and
-  all three domains — this is the "follow-up post" reference in the
-  post's commented-out chunk-size aside. Also supports `--zstd-dict` and
-  `--lz4-blocks` flags for two extra baselines (ES/Lucene-style block LZ4,
-  and the zstd `--train` dictionary ratio at each chunk size) merged into the
-  same `summary_tables_256_512_2000.json`.
+  numbers for **10 of the 15 methods per domain** (everything except the
+  three `+freq` bars), swept across all **three chunk sizes (256/512/2000
+  tokens)** and all three domains — this is the "follow-up post" reference
+  in the post's commented-out chunk-size aside. Also supports `--zstd-dict`
+  and `--lz4-blocks` flags for two extra baselines (ES/Lucene-style block
+  LZ4, and the zstd `--train` dictionary ratio at each chunk size) merged
+  into the same `summary_tables_256_512_2000.json`. Verified by running
+  it end to end: reproduces the chart's numbers exactly, e.g. English/512
+  r50k+ANS 3.30x, cl100k+ANS 3.37x, o200k+ANS 3.40x. Note: this script's RNG
+  is shared and consumed sequentially across the `for chunk_size in
+  CHUNK_SIZES: for domain in DOMAINS` loop — running only a slice of it
+  (e.g. isolating just `chunk_size=512`) desyncs the random stream and will
+  NOT reproduce the same sampled chunks; run the whole script.
+- `bench_freqremap.py` — the `+freq` bars in the main chart (all 3 domains ×
+  all 3 tokenizers, all 3 chunk sizes) — this is the **only** script in the
+  repo that computes `+freq` compression ratio across more than one domain,
+  and it's the actual source of the main chart's `+freq` values, verified by
+  running it: English/512 r50k+freq 2.62x, cl100k+freq 2.71x, o200k+freq
+  2.76x; code/512 1.42x/2.57x/2.53x; hindi/512 1.33x/2.04x/4.39x, all exact
+  matches. Its per-component *timing* breakdown was superseded by
+  `bench_freq_split.py` (see below), but its *ratio* numbers are not
+  duplicated anywhere else and are load-bearing for the main chart.
 - `bench_full_results_table.py` — the "Full results and latency tables"
   collapsible: min/median/max compression ratio and median/p99 latency,
   English (C4), 512-token chunks, keeping per-chunk arrays (so min/max/p99
@@ -126,14 +145,18 @@ Each directory is one section of the blog post, runnable independently once
   `bench_agent_writer.py` and `bench_freq_split.py` (below), these three
   scripts populate every value in the post's `latParts`.
 
-### `04_frequency_remap/` — the `+freq` component breakdown
+### `04_frequency_remap/` — the `+freq` method: ratio and latency breakdown
 
+- `bench_freqremap.py` — the `+freq` compression ratio for the main chart
+  (see above), across all 3 domains, all 3 tokenizers, all 3 chunk sizes.
 - `bench_freq_split.py` — splits `+freq`'s encode/decode into its real
-  components (an earlier script only timed the streamvbyte codec calls,
-  with the numpy rank-remap/lookup step done outside the timed region):
-  `rank_remap_only`, `streamvbyte_enc`, `streamvbyte_dec`, `rank_lookup_only`,
-  per domain and tokenizer. Feeds `rankRemap`/`svbEnc`/`svbDec`/`rankLookup`
-  in `latParts`.
+  components (an earlier script — `bench_freqremap.py` above — only timed
+  the streamvbyte codec calls, with the numpy rank-remap/lookup step done
+  outside the timed region): `rank_remap_only`, `streamvbyte_enc`,
+  `streamvbyte_dec`, `rank_lookup_only`, per domain and tokenizer. Feeds
+  `rankRemap`/`svbEnc`/`svbDec`/`rankLookup` in `latParts`. (Only the timing
+  methodology in `bench_freqremap.py` is superseded here — its ratio numbers,
+  above, are still the canonical source for the main chart.)
 
 ### `05_mxbai_wordpiece/` — do embedding-model tokenizers compress well too?
 
@@ -152,8 +175,9 @@ Each directory is one section of the blog post, runnable independently once
 
 | Blog claim | Script |
 | --- | --- |
-| Main chart: compression ratio, all domains, 512-token chunks | `01_storage_efficiency/bench_summary_tables.py` |
-| 256/512/2000-token chunk-size sweep | `01_storage_efficiency/bench_summary_tables.py` |
+| Main chart: compression ratio, all domains, 512-token chunks (LZ4/gzip/zstd/brotli/raw/+ANS) | `01_storage_efficiency/bench_summary_tables.py` |
+| Main chart: `+freq` bars, all domains, 512-token chunks | `04_frequency_remap/bench_freqremap.py` |
+| 256/512/2000-token chunk-size sweep | `01_storage_efficiency/bench_summary_tables.py` + `04_frequency_remap/bench_freqremap.py` (for `+freq`) |
 | "Full results" min/median/max ratio + latency table (English, 512-tok) | `01_storage_efficiency/bench_full_results_table.py` |
 | zstd `--train` compress/decompress latency (`latParts.zstdT`) | `01_storage_efficiency/bench_zstd_train_fix.py` |
 | Entropy coder vs. tokenizer contribution (1.76x / 3.26x / 2.73x) | `01_storage_efficiency/bench_entropy_vs_tokenizer.py` |
@@ -186,9 +210,6 @@ repo so there's exactly one script per number:
 
 - `bench_agent_mode.py` → superseded by `bench_agent_mode_v2.py` (fixed
   single-shot timing noise on sub-microsecond ops).
-- `bench_freqremap.py` → superseded by `bench_freq_split.py` (the original
-  timed rank-remap + streamvbyte together; the split version isolates each
-  component).
 - `bench_agent_serving.py` → an earlier, narrower version of the Agent/Human
   latency split (only zstd-19 as the representative byte codec); superseded
   by `bench_agent_writer.py` + `bench_agent_mode_v2.py`, which cover every
