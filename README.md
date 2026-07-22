@@ -175,9 +175,10 @@ Each directory is one section of the blog post, runnable independently once
 
 | Blog claim | Script |
 | --- | --- |
-| Main chart: compression ratio, all domains, 512-token chunks (LZ4/gzip/zstd/brotli/raw/+ANS) | `01_storage_efficiency/bench_summary_tables.py` |
+| Main chart: LZ4/gzip/zstd/brotli/raw/+ANS bars, all domains, 512-token chunks | `01_storage_efficiency/bench_summary_tables.py` (default run) |
+| Main chart: `zstd --train` bars, all domains, 512-token chunks | `01_storage_efficiency/bench_summary_tables.py --zstd-dict` (verified exact: prose 2.66x, code 3.24x, hindi 4.56x) |
 | Main chart: `+freq` bars, all domains, 512-token chunks | `04_frequency_remap/bench_freqremap.py` |
-| 256/512/2000-token chunk-size sweep | `01_storage_efficiency/bench_summary_tables.py` + `04_frequency_remap/bench_freqremap.py` (for `+freq`) |
+| 256/512/2000-token chunk-size sweep | all three of the above, run at each `chunk_size` in `CHUNK_SIZES` |
 | "Full results" min/median/max ratio + latency table (English, 512-tok) | `01_storage_efficiency/bench_full_results_table.py` |
 | zstd `--train` compress/decompress latency (`latParts.zstdT`) | `01_storage_efficiency/bench_zstd_train_fix.py` |
 | Entropy coder vs. tokenizer contribution (1.76x / 3.26x / 2.73x) | `01_storage_efficiency/bench_entropy_vs_tokenizer.py` |
