@@ -2,3 +2,8 @@ venv/
 __pycache__/
 *.pyc
 *.log
+data/corpus/*.npy
+*_results.json
+full_results_table.json
+zstd_train_fixed_results.json
+summary_tables_*.json

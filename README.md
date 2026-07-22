@@ -5,10 +5,40 @@ Language Models Already Speak](https://www.kshivendu.dev/blog/token-storage).
 
 Every number quoted in that post comes from one of the scripts below, run
 against real tokenizers (`tiktoken`'s r50k/cl100k/o200k, HuggingFace's
-Qwen2.5/DeepSeek-V2/Gemma-2/mxbai), the real `constriction` ANS library, and
-real corpora (WikiText-103). Nothing here is estimated or simulated. This
-repo intentionally leaves out side experiments that were tried during
-writing but didn't make it into the final post.
+Qwen2.5/DeepSeek-V2/Gemma-2/BERT-WordPiece), the real `constriction` ANS
+library, and real held-out corpora: English ([C4](https://huggingface.co/datasets/allenai/c4)),
+code ([codeparrot-clean](https://huggingface.co/datasets/codeparrot/codeparrot-clean),
+Python), and Hindi ([Wikipedia](https://huggingface.co/datasets/wikimedia/wikipedia)).
+Nothing here is estimated or simulated.
+
+Note: the scripts internally call the English/prose domain `"prose"` — that's
+the same thing the post calls `"english"`.
+
+## Shared conventions
+
+Unless a script says otherwise:
+
+- **512-token chunks** (the post's main chart also sweeps 256/512/2000 tokens —
+  see `bench_summary_tables.py`).
+- **40 sampled test chunks** per domain, drawn from a held-out test split that
+  the training-side frequency/dictionary tables never see.
+- **RNG seed 3344** (some earlier/exploratory scripts used seed 9012; every
+  script that feeds a number actually in the post uses 3344).
+- **Bootstrap confidence intervals** (2000 resamples, 90% CI) around the
+  median for ratio/latency claims, so a single unlucky chunk can't swing a
+  reported number.
+- Latency for fast operations (sub-few-µs: unpacking, ANS/streamvbyte
+  decode, rank remap/lookup) is the **median of 30 back-to-back reps per
+  chunk** — a single `perf_counter()` pair is dominated by GC/scheduler
+  noise at that scale. Slower operations (tokenize, real compress/decompress)
+  are timed single-shot per chunk, which is fine at 100s of µs.
+- All methods are **lossless** except mxbai WordPiece (see `05_mxbai_wordpiece/`).
+
+This repo intentionally leaves out earlier/exploratory scripts once a later
+script fixed a real methodology bug in them or reran the same measurement
+more rigorously (see "Superseded scripts" at the bottom) and anything from an
+unrelated side-project (an FSE/tANS/KV-cache-compression experiment series)
+that happened to live in the same working directory during benchmarking.
 
 ## Setup
 
@@ -17,83 +47,167 @@ python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Everything downloads its own data on first run (WikiText-103 and the HF
-tokenizers via `datasets`/`transformers`, cached by HF after the first call;
-no full model weights are downloaded, only tokenizer configs).
+Then build the corpus once (downloads C4/codeparrot/Hindi-Wikipedia via
+`datasets`, streamed rather than fully downloaded, and pre-tokenizes them
+with r50k):
 
-Static frequency tables are checked in alongside the scripts that need them
-so you don't have to re-tokenize the full WikiText-103 train split (~118M
-tokens) just to load a probability table. Delete a `static_probs_*.npy` file
-and re-run its script if you want to regenerate it from scratch instead.
+```bash
+python 00_corpus_prep/prep_multidomain.py
+```
+
+This writes `data/corpus/{prose,code,hindi}_{train,test}.npy` (compact
+r50k token-id arrays, not raw text — a few hundred MB total). Every other
+script reads from `data/corpus/`, so this must run first. `05_mxbai_wordpiece/`
+is the one exception: it downloads WikiText-103 directly (see below for why).
 
 ## Layout
 
-Each directory is one section of the blog post, runnable independently:
+Each directory is one section of the blog post, runnable independently once
+`data/corpus/` exists:
 
-### `01_storage_efficiency/` — the main benchmark chart
+### `00_corpus_prep/` — builds the shared corpus
 
-- `bench_static.py` — static-table ANS vs per-document ANS (the ~900B/doc
-  per-doc-table overhead argument for why the table has to be shared), plus
-  a block-size sweep (does training a fresh table per 16KB/1MB block ever
-  beat one shared static table? No, not until multi-MB blocks).
-- `bench_static_full.py` — full run across length buckets, r50k + cl100k,
-  gives the min/median/max numbers in the post's results table
-  (r50k+ANS: 1.68x/3.37x/4.30x, cl100k+ANS: 1.68x/3.30x/4.14x).
-- `bench_competitors.py` — the byte-codec baselines (gzip/zstd/brotli) and
-  the `zstd --train` dictionary comparison (2.61x, "the fairest competitor
-  to r50k+ANS"), plus the order-0 byte-level ANS check (1.73x) that isolates
-  how much of the ratio is the tokenizer vs. the entropy coder.
+- `prep_multidomain.py` — streams C4 (en), codeparrot-clean (Python), and
+  Hindi Wikipedia from HuggingFace, tokenizes with r50k, and splits each into
+  a TRAIN portion (~8M tokens, used only to build frequency/ANS/zstd-dict
+  tables) and a held-out TEST portion (~1.5M tokens, used only for
+  measurement). Nothing downstream ever trains on the test split.
+
+### `01_storage_efficiency/` — the main benchmark chart + full results table
+
+- `bench_summary_tables.py` — the interactive chart's `ratioValues`/latency
+  numbers, swept across all **three chunk sizes (256/512/2000 tokens)** and
+  all three domains — this is the "follow-up post" reference in the
+  post's commented-out chunk-size aside. Also supports `--zstd-dict` and
+  `--lz4-blocks` flags for two extra baselines (ES/Lucene-style block LZ4,
+  and the zstd `--train` dictionary ratio at each chunk size) merged into the
+  same `summary_tables_256_512_2000.json`.
+- `bench_full_results_table.py` — the "Full results and latency tables"
+  collapsible: min/median/max compression ratio and median/p99 latency,
+  English (C4), 512-token chunks, keeping per-chunk arrays (so min/max/p99
+  are real, not derived).
+- `bench_zstd_train_fix.py` — fixes a real bug in an earlier zstd `--train`
+  timing measurement (a fresh `ZstdCompressor` was created per call, forcing
+  the 112KB trained dictionary to be re-digested every time: ~22.6ms/call
+  vs ~28µs/call once precomputed and reused). Feeds the `zstdT` compress/
+  decompress numbers in the post's `latParts`.
+- `bench_entropy_vs_tokenizer.py` — the "entropy coder vs. tokenizer" and
+  "streamvbyte vs. +freq rank-remap contribution" collapsible: ANS on raw
+  UTF-8 bytes (1.76x) vs. token-level ANS (3.26x) vs. zstd-19 on packed
+  token-ID bytes (2.73x); and streamvbyte with vs. without rank-remap
+  (2.13x vs 2.64x).
+- `check_id_vs_freq.py` — optional/supporting: the Spearman correlation
+  check behind "BPE assigns token IDs in merge-discovery order, not
+  frequency" (a qualitative claim in the post's prose, not a specific
+  number quoted in a chart/table — kept because it's the actual evidence
+  for that claim, not required to reproduce any single figure).
 
 ### `02_multi_tokenizer/` — "this isn't an OpenAI-specific trick"
 
-- `bench_cl100k_packing.py` — cl100k packing widths: uint32 (current), 3-byte
-  (practical fix), and the exact-minimum 17-bit packing (better ratio, much
-  costlier decode, why 3-byte wins in practice).
-- `bench_o200k_full.py` — same methodology for o200k (GPT-4o's tokenizer):
-  ratio (1.14x uint32 / 1.52x 3-byte / 3.32x ANS) and full latency
-  (tokenizer-only / +3-byte / +ANS, median and p99).
-- `bench_other_llms.py` — Qwen2.5, DeepSeek-V2, Gemma-2 (real HF tokenizers,
-  tokenizer config only, no model weights): confirms the same packing/ANS
-  pattern holds industry-wide, and that Gemma-2's 256,000-token vocabulary
-  (the largest tested) gets the best compression of the six.
+- `bench_tokenizer_gen.py` — the cross-tokenizer table: r50k, cl100k,
+  o200k, Qwen2.5, DeepSeek-V2, Gemma-2 (real HF tokenizer configs, no model
+  weights downloaded), each with uint32/16 raw / 3-byte raw / +static-ANS
+  ratios, on the same English (C4), 512-token-chunk methodology as the
+  rest of the post.
 
-### `03_latency/` — encode/decode latency benchmark
+### `03_latency/` — the Agent/Human write & read latency charts
 
-- `bench_latency.py` / `bench_latency_static.py` — median + p99 latency for
-  every method in the storage benchmark, split into tokenizer-only vs
-  +ANS increments (the numbers behind the stacked latency chart).
+- `bench_agent_writer.py` — write-side components when the writer is an
+  agent (source is already token IDs): `detokenize_only` (what byte codecs
+  pay), `raw_pack_only`, `freq_encode_only`, `ans_encode_only`.
+- `bench_agent_mode_v2.py` — read-side components for both Agent mode
+  (decompress+tokenize for byte codecs; unpack/ANS-decode only for
+  token-native, no detokenize) and the byte-codec `decompress_only`
+  baseline. This is `v2`: it fixes a real bug in `bench_agent_mode.py`
+  (single-shot timing on sub-microsecond ops is noise-dominated — e.g. the
+  original had r50k unpack measuring *slower* than LZ4 decompress, which
+  makes no sense for a zero-copy reinterpret vs. real decompression). `v2`
+  times fast ops as a median of 30 reps instead. Together with
+  `bench_agent_writer.py` and `bench_freq_split.py` (below), these three
+  scripts populate every value in the post's `latParts`.
 
-### `04_frequency_remap/` — the cheaper alternative to ANS
+### `04_frequency_remap/` — the `+freq` component breakdown
 
-- `freq_remap_full.py` — reassigns token IDs by real corpus frequency rank
-  instead of BPE's merge-discovery order, then compares uint32 / uint16 or
-  3-byte (whichever is practical) / frequency-remap+streamvbyte / ANS. This
-  is the experiment behind "A Faster Alternative to ANS" and the actual ask
-  to tokenizer vendors: assign IDs by frequency at training time and this
-  entire section becomes free.
+- `bench_freq_split.py` — splits `+freq`'s encode/decode into its real
+  components (an earlier script only timed the streamvbyte codec calls,
+  with the numpy rank-remap/lookup step done outside the timed region):
+  `rank_remap_only`, `streamvbyte_enc`, `streamvbyte_dec`, `rank_lookup_only`,
+  per domain and tokenizer. Feeds `rankRemap`/`svbEnc`/`svbDec`/`rankLookup`
+  in `latParts`.
 
 ### `05_mxbai_wordpiece/` — do embedding-model tokenizers compress well too?
 
 - `bench_mxbai_percentiles.py` — mxbai-embed-large-v1's WordPiece tokenizer
-  (30,522-token vocab) vs r50k: nearly identical raw packing, ~5% better
-  compression with ANS, but an 80%+ character error rate from BERT's
-  lowercasing (`"Qdrant"` → `"qdrant"`), which is why it's not a viable
-  lossless codec despite the better ratio.
+  (30,522-token vocab): raw uint16 (median 2.35x) and +static ANS (median
+  3.56x), plus the character-error-rate (CER) analysis (avg 80.4%) that's
+  the reason WordPiece isn't viable as a lossless codec. **Uses WikiText-103
+  test articles, not C4** — the post's own CER claim is specifically
+  "80.4% of WikiText-103 articles came back corrupted," so this script's
+  corpus choice matches the post's actual wording, even though the rest of
+  the repo has moved to C4/codeparrot/Hindi-Wikipedia. Ships with a cached
+  `static_probs_mxbai.npy` so you don't need to rebuild the frequency table
+  from scratch. Verified to still reproduce the post's numbers exactly.
 
 ## Reproducing specific numbers
 
 | Blog claim | Script |
 | --- | --- |
-| r50k raw uint16 already beats every byte codec (2.33x) | `01_storage_efficiency/bench_static_full.py` |
-| r50k + static ANS reaches 3.37x | `01_storage_efficiency/bench_static_full.py` |
-| Per-document tables cost ~900 bytes and erase the gain | `01_storage_efficiency/bench_static.py` |
-| The fairest competitor, `zstd --train`, reaches 2.61x | `01_storage_efficiency/bench_competitors.py` |
-| How much of the ratio is the tokenizer vs. the entropy coder (order-0 byte ANS: 1.73x) | `01_storage_efficiency/bench_competitors.py` |
-| cl100k/o200k naive uint32 packing is worse than gzip; 3-byte packing fixes it | `02_multi_tokenizer/bench_cl100k_packing.py`, `bench_o200k_full.py` |
-| Same pattern holds for Qwen2.5 / DeepSeek-V2 / Gemma-2 | `02_multi_tokenizer/bench_other_llms.py` |
-| ANS decode is slower than LZ4, encode/decode latency table | `03_latency/bench_latency.py`, `bench_latency_static.py` |
-| Frequency-sorted IDs + streamvbyte recovers most of ANS's ratio at ~1/15th the decode latency | `04_frequency_remap/freq_remap_full.py` |
-| mxbai WordPiece: comparable ratio, 80%+ CER from lowercasing | `05_mxbai_wordpiece/bench_mxbai_percentiles.py` |
+| Main chart: compression ratio, all domains, 512-token chunks | `01_storage_efficiency/bench_summary_tables.py` |
+| 256/512/2000-token chunk-size sweep | `01_storage_efficiency/bench_summary_tables.py` |
+| "Full results" min/median/max ratio + latency table (English, 512-tok) | `01_storage_efficiency/bench_full_results_table.py` |
+| zstd `--train` compress/decompress latency (`latParts.zstdT`) | `01_storage_efficiency/bench_zstd_train_fix.py` |
+| Entropy coder vs. tokenizer contribution (1.76x / 3.26x / 2.73x) | `01_storage_efficiency/bench_entropy_vs_tokenizer.py` |
+| `+freq` ratio contribution: rank-remap vs. streamvbyte alone (2.13x / 2.64x) | `01_storage_efficiency/bench_entropy_vs_tokenizer.py` |
+| "BPE assigns IDs by merge order, not frequency" (Spearman check) | `01_storage_efficiency/check_id_vs_freq.py` |
+| Cross-tokenizer table (r50k/cl100k/o200k/Qwen2.5/DeepSeek-V2/Gemma-2) | `02_multi_tokenizer/bench_tokenizer_gen.py` |
+| Write latency chart, Agent mode (`latParts.rawPack/rankRemap/svbEnc/ansEnc`, detokenize tax for byte codecs) | `03_latency/bench_agent_writer.py` |
+| Read latency chart, Agent mode (`latParts.rawUnpack/ansDec`, tokenize tax for byte codecs) | `03_latency/bench_agent_mode_v2.py` |
+| `+freq` component split (`latParts.rankRemap/svbEnc/svbDec/rankLookup`) | `04_frequency_remap/bench_freq_split.py` |
+| mxbai WordPiece: comparable ratio, 80.4% CER from lowercasing | `05_mxbai_wordpiece/bench_mxbai_percentiles.py` |
+
+## Superseded scripts (not included)
+
+**A note on corpus history:** an earlier version of this repo (and an earlier
+version of the post) benchmarked everything on WikiText-103 only. The post
+was later rewritten to use three held-out domains (C4/codeparrot/Hindi
+Wikipedia) instead, and the numbers changed as a result (e.g. the old
+WikiText-103 run reported r50k+ANS median 3.37x; the current post's own
+"Full results" table, on C4, reports 3.26x). The old `01_storage_efficiency`
+/ `02_multi_tokenizer` / `03_latency` / `04_frequency_remap` scripts from
+that earlier version have been fully replaced by the ones listed above —
+none of the old scripts' numbers match what's in the post today. Only
+`05_mxbai_wordpiece/` was untouched, since the post's own WordPiece/CER
+claim is specifically about WikiText-103.
+
+Beyond that corpus migration, some individual scripts were real earlier runs
+during the current writing process, superseded by a later script that fixed
+a measurement bug or reran the same thing more rigorously — kept out of this
+repo so there's exactly one script per number:
+
+- `bench_agent_mode.py` → superseded by `bench_agent_mode_v2.py` (fixed
+  single-shot timing noise on sub-microsecond ops).
+- `bench_freqremap.py` → superseded by `bench_freq_split.py` (the original
+  timed rank-remap + streamvbyte together; the split version isolates each
+  component).
+- `bench_agent_serving.py` → an earlier, narrower version of the Agent/Human
+  latency split (only zstd-19 as the representative byte codec); superseded
+  by `bench_agent_writer.py` + `bench_agent_mode_v2.py`, which cover every
+  codec.
+- `bench_full_results_table.py` vs. `bench_summary_tables.py`: both are kept
+  (they answer different collapsibles — a min/median/max table vs. the main
+  interactive chart), but their numbers for supposedly-identical conditions
+  don't quite match (e.g. English/512-token o200k+ANS: ~3.18x in the full
+  results table vs. ~3.40x in the summary tables). `bench_summary_tables.py`
+  is the more rigorous of the two (bootstrap CIs; `bench_full_results_table.py`
+  has none) — treat it as the reference if the two ever disagree.
+
+Also excluded: everything that belongs to a separate, unrelated FSE/tANS/
+KV-cache-compression project (tracked in a different repo, `axiom-labs/wholembed`)
+that happened to share a working directory on the benchmark host
+(`ablation_table_size.py`, `bench_long_context.py`, `bench_real_fse.py`,
+`bench_tans.py`, `tans.py`, `bench_multidomain.py`, `bench_raw_and_tokenizers.py`,
+`test_zstd_dict_overhead*.py`, `fse_src/`, `libfse_wrap.so`, `wrapper.c`) —
+none of these produce a number that appears in this post.
 
 ## License
 
