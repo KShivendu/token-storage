@@ -1,0 +1,18 @@
+[project]
+name = "token-storage"
+version = "0.1.0"
+description = "Experiments behind the Token-Native Storage blog post"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "tiktoken",
+    "transformers",
+    "tokenizers",
+    "datasets",
+    "constriction",
+    "zstandard",
+    "lz4",
+    "brotli",
+    "pyfastpfor",
+]
