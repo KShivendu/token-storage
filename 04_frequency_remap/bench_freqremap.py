@@ -56,7 +56,7 @@ for domain in DOMAINS:
             train_ids = enc.encode(train_text, disallowed_special=())
             rank_of, token_of_rank = build_rank_table(train_ids, vocab_size)
 
-            ratios, enc_t, agent_dec_t, human_extra_t = [], [], [], []
+            ratios, mo_ratios, enc_t, agent_dec_t, human_extra_t = [], [], [], [], []
             for raw, text in zip(raw_byte_lists, texts):
                 t0 = time.perf_counter()
                 ids = enc.encode(text, disallowed_special=())
@@ -64,6 +64,10 @@ for domain in DOMAINS:
                 remapped = rank_of[ids_arr]
                 payload = svb_encode_arr(remapped)
                 t1 = time.perf_counter()
+
+                # merge-order (un-ranked) streamvbyte: isolates the re-rank's
+                # contribution by packing the ORIGINAL BPE IDs, no rank_of remap.
+                mo_ratios.append(len(raw) / len(svb_encode_arr(ids_arr.astype(np.uint32))))
 
                 t2 = time.perf_counter()
                 decoded_remapped = svb_decode_arr(payload, len(ids))
@@ -81,6 +85,7 @@ for domain in DOMAINS:
                 human_extra_t.append(t4 - t3)
 
             results[(domain, tok_key, chunk_size, "ratio")] = bootstrap_ci(ratios)
+            results[(domain, tok_key, chunk_size, "ratio_mergeorder")] = bootstrap_ci(mo_ratios)
             results[(domain, tok_key, chunk_size, "encode")] = bootstrap_ci(np.array(enc_t) * 1e6)
             results[(domain, tok_key, chunk_size, "agent_decode")] = bootstrap_ci(
                 np.array(agent_dec_t) * 1e6
