@@ -85,22 +85,24 @@ for domain in DOMAINS:
     texts = [r50k.decode(c.tolist()) for c in chunks_r50k]
     raw_byte_lists = [t.encode("utf-8") for t in texts]
 
-    # ---- byte codecs: decompress-only (robust) ----
+    # ---- byte codecs: compress (write side) + decompress (read side) ----
     codecs = {
         "LZ4": (lambda b: lz4f.compress(b), lambda c: lz4f.decompress(c)),
         "gzip-9": (lambda b: gzip.compress(b, 9), lambda c: gzip.decompress(c)),
         "zstd-19": (lambda b: zstd_c19.compress(b), lambda c: zstd_d.decompress(c)),
         "brotli-q11": (lambda b: brotli.compress(b, quality=11), lambda c: brotli.decompress(c)),
     }
-    # Compress ONCE per chunk, then repeatedly decompress that same payload
-    # (that's what "decompress_only" should time, not recompression cost).
+    # Time compress (the write-side cost) separately, then compress ONCE per
+    # chunk and repeatedly decompress that fixed payload (the read-side cost).
     for name, (comp, decomp) in codecs.items():
-        dec_t = []
+        comp_t, dec_t = [], []
         for raw in raw_byte_lists:
+            comp_t.append(timed_reps(lambda r=raw: comp(r)))
             c = comp(raw)
             dec_t.append(timed_reps(lambda c=c: decomp(c)))
+        results[(domain, name, "compress_only")] = bootstrap_ci(comp_t)
         results[(domain, name, "decompress_only")] = bootstrap_ci(dec_t)
-        print(f"  {name} decompress_only done", flush=True)
+        print(f"  {name} compress/decompress done", flush=True)
 
     # zstd --train: 112KB dict trained on this domain's train split
     train_chunks_bytes = [
@@ -110,12 +112,14 @@ for domain in DOMAINS:
     zdict = zstd.ZstdCompressionDict(zstd.train_dictionary(112 * 1024, train_chunks_bytes).as_bytes())
     zc_dict = zstd.ZstdCompressor(level=19, dict_data=zdict)
     zd_dict = zstd.ZstdDecompressor(dict_data=zdict)
-    dec_t = []
+    comp_t, dec_t = [], []
     for raw in raw_byte_lists:
+        comp_t.append(timed_reps(lambda r=raw: zc_dict.compress(r)))
         c = zc_dict.compress(raw)
         dec_t.append(timed_reps(lambda c=c: zd_dict.decompress(c)))
+    results[(domain, "zstd --train", "compress_only")] = bootstrap_ci(comp_t)
     results[(domain, "zstd --train", "decompress_only")] = bootstrap_ci(dec_t)
-    print("  zstd --train decompress_only done", flush=True)
+    print("  zstd --train compress/decompress done", flush=True)
 
     # ---- per-tokenizer: tokenize-only (single-shot, large enough), raw
     # unpack-only (robust), ANS decode-only (robust) ----
@@ -169,8 +173,9 @@ print(f"{'=' * 100}")
 for domain in DOMAINS:
     print(f"\n-- {domain} --")
     for name in ["LZ4", "gzip-9", "zstd-19", "brotli-q11", "zstd --train"]:
-        v = results[(domain, name, "decompress_only")]
-        print(f"  {name:<14} decompress_only={v[0]:.2f}us [{v[1][0]:.2f},{v[1][1]:.2f}]")
+        cr = results[(domain, name, "compress_only")]
+        dr = results[(domain, name, "decompress_only")]
+        print(f"  {name:<14} compress_only={cr[0]:>9.2f}us  decompress_only={dr[0]:>7.2f}us")
     for tok_key in TOKENIZERS:
         t = results[(domain, tok_key, "tokenize_only")]
         u = results[(domain, tok_key, "raw_unpack_only")]
