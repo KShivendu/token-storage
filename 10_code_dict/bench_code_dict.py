@@ -55,16 +55,15 @@ N_CHUNKS = 40
 REPS = 30
 SEED = 9012                       # match Table 1 path B
 N_BOOTSTRAP = 2000
-TOK = "cl100k"                    # strongest Kalcher tokenizer on code
-ENC_NAME = {"cl100k": "cl100k_base"}[TOK]
-VOCAB = {"cl100k": 100277}[TOK]
+TOKENIZERS = {"r50k": ("r50k_base", 50257),
+              "cl100k": ("cl100k_base", 100277),
+              "o200k": ("o200k_base", 200019)}
 DICT_SIZES = [16 * 1024, 64 * 1024, 112 * 1024, 256 * 1024]
 MAX_TRAIN_SAMPLES = 15000         # pooled train chunks used to train the dict
 # code = full sweep; prose/hindi = single 112K dict as a "does it help language?" check
 DOMAIN_PLAN = {"code": DICT_SIZES, "prose": [112 * 1024], "hindi": [112 * 1024]}
 
 r50k = tiktoken.get_encoding("r50k_base")
-enc = tiktoken.get_encoding(ENC_NAME)
 zstd_c22 = zstd.ZstdCompressor(level=22)
 zstd_d = zstd.ZstdDecompressor()
 
@@ -96,20 +95,20 @@ def timed_reps(fn, reps=REPS):
     return float(np.median(ts))
 
 
-def run_domain(domain, rng):
-    print(f"\n########## {domain} ({TOK}) ##########", flush=True)
+def run_domain(domain, tok, enc, vocab, rng):
+    print(f"\n########## {domain} ({tok}) ##########", flush=True)
     train = np.load(os.path.join(CORPUS_DIR, f"{domain}_train.npy")).astype(np.int64)
     test = np.load(os.path.join(CORPUS_DIR, f"{domain}_test.npy")).astype(np.int64)
     train_text = r50k.decode(train.tolist())
 
-    # full-train cl100k rank table (freq remap) + ANS model
+    # full-train rank table (freq remap) + ANS model, in this tokenizer
     train_ids = np.array(enc.encode(train_text, disallowed_special=()), dtype=np.int64)
-    fcounts = np.bincount(train_ids, minlength=VOCAB)
+    fcounts = np.bincount(train_ids, minlength=vocab)
     order = np.argsort(-fcounts)
-    rank_of = np.empty(VOCAB, dtype=np.uint32)
-    rank_of[order] = np.arange(VOCAB, dtype=np.uint32)
+    rank_of = np.empty(vocab, dtype=np.uint32)
+    rank_of[order] = np.arange(vocab, dtype=np.uint32)
     token_of_rank = order.astype(np.int64)
-    ans_counts = np.ones(VOCAB, dtype=np.int64) + fcounts
+    ans_counts = np.ones(vocab, dtype=np.int64) + fcounts
     ans_probs = ans_counts.astype(np.float64) / ans_counts.sum()
     ans_model = constriction.stream.model.Categorical(ans_probs, perfect=False)
 
@@ -134,7 +133,7 @@ def run_domain(domain, rng):
     test_remapped = [rank_of[ids] for ids in test_ids]
     test_varint = [leb128_encode(rm) for rm in test_remapped]
 
-    out = {"domain": domain, "tokenizer": TOK, "methods": {}}
+    out = {"domain": domain, "tokenizer": tok, "methods": {}}
 
     def record(name, ratios, decs, extra=None):
         m = {"ratio": bootstrap_ci(ratios, rng), "decode_us": bootstrap_ci(decs, rng)}
@@ -224,7 +223,7 @@ def main():
     rng = np.random.default_rng(SEED)
     results = {
         "config": {
-            "tokenizer": TOK, "chunk_size": CHUNK_SIZE, "n_chunks": N_CHUNKS,
+            "tokenizers": list(TOKENIZERS), "chunk_size": CHUNK_SIZE, "n_chunks": N_CHUNKS,
             "reps": REPS, "seed": SEED,
             "methodology": "matches Table 1 path B (seed 9012, full-train rank/ANS); dict trained "
                            "corpus-wide on TRAIN split varint samples, evaluated on held-out TEST",
@@ -232,25 +231,24 @@ def main():
             "dict_sizes_code": [d // 1024 for d in DICT_SIZES],
             "max_train_samples": MAX_TRAIN_SAMPLES,
         },
-        "domains": {},
+        "grid": {},
     }
-    for domain in ["code", "prose", "hindi"]:
-        results["domains"][domain] = run_domain(domain, rng)
+    for tok, (enc_name, vocab) in TOKENIZERS.items():
+        enc = tiktoken.get_encoding(enc_name)
+        results["grid"][tok] = {}
+        for domain in ["code", "prose", "hindi"]:
+            results["grid"][tok][domain] = run_domain(domain, tok, enc, vocab, rng)
 
-    # ── summary: code table ──
-    print(f"\n{'=' * 82}\nCODE ({TOK}) -- ratio, decode us/chunk, dict size\n{'=' * 82}")
-    print(f"  {'method':<34}{'ratio':>9}{'decode us':>12}{'dict':>8}")
-    for name, m in results["domains"]["code"]["methods"].items():
-        ds = m.get("dict_bytes")
-        print(f"  {name:<34}{m['ratio'][0]:>8.2f}x{m['decode_us'][0]:>11.1f}"
-              f"{(str(ds // 1024) + 'K') if ds else '-':>8}")
-
-    print(f"\n{'=' * 82}\nDICT ON LANGUAGE (does NOT help expected) -- ratio vs no-dict Kalcher-zstd\n{'=' * 82}")
-    for domain in ["prose", "hindi"]:
-        md = results["domains"][domain]["methods"]
-        nd = md["Kalcher (LEB128+zstd, no dict)"]["ratio"][0]
-        dd = md["dict-zstd (112K)"]["ratio"][0]
-        print(f"  {domain:<8} no-dict={nd:.2f}x  dict-112K={dd:.2f}x  delta={dd - nd:+.2f}x")
+    # ── summary grid: zstd --train on token IDs (112K dict) per tokenizer x domain ──
+    print(f"\n{'=' * 90}\nzstd --train ON TOKEN IDs (112K dict) -- ratio per tokenizer x domain\n{'=' * 90}")
+    print(f"  {'tok':<8}{'domain':<8}{'no-dict':>9}{'dict-112K':>11}{'delta':>8}{'Kalcher-LZMA':>14}")
+    for tok in TOKENIZERS:
+        for domain in ["code", "prose", "hindi"]:
+            md = results["grid"][tok][domain]["methods"]
+            nd = md["Kalcher (LEB128+zstd, no dict)"]["ratio"][0]
+            dd = md["dict-zstd (112K)"]["ratio"][0]
+            kl = md["Kalcher (LEB128+LZMA)"]["ratio"][0]
+            print(f"  {tok:<8}{domain:<8}{nd:>8.2f}x{dd:>10.2f}x{dd - nd:>+7.2f}x{kl:>13.2f}x")
 
     out_path = os.path.join(os.path.dirname(__file__), "results.json")
     with open(out_path, "w") as f:
