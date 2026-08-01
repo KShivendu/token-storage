@@ -22,10 +22,15 @@ Byte-codec reference (tokenizer-independent, measured once per domain on the
 r50k chunk sample): LZ4 / gzip-9 / zstd-19 / brotli-q11 / zstd --train, reported
 as compress_only + decompress_only components (as 03_latency now does). The byte
 path's mandatory tokenize/detokenize tax is reported per tokenizer as
-serving-cold single shots.
+TEXT-COLD single shots (timed_once). NOTE: text-cold understates the true
+serving-cold cost, because the loop keeps the tokenizer's rank table
+cache-resident. The eviction-based serving-cold number the PAPER uses (~280us r50k
+tokenize) comes from 09_cold_tokenize's synthetic evictor, not this file. The JSON
+key `tokenize_serving_cold_us` is thus text-cold (~110-170us); read it as a lower
+bound.
 
 Conventions: codec ops = timed_reps (warm, median-of-30); tokenize/detokenize =
-timed_once (serving-cold, single shot); per-cell deterministic seeds
+timed_once (text-cold single shot, understates serving); per-cell deterministic seeds
 default_rng([SEED, tok_idx, domain_idx]); full-train rank/ANS tables; ratios and
 round-trip asserts kept. English (prose) is the headline; all domains computed.
 """

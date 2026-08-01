@@ -84,7 +84,11 @@ def timed_reps(fn, reps=30):
 
 
 def timed_once(fn):
-    """SERVING-COLD: single perf_counter shot, microseconds."""
+    """TEXT-COLD: single perf_counter shot, microseconds. The input text is cold on
+    first touch, but back-to-back calls in a loop keep a large lookup table (e.g. a
+    tokenizer's rank table) cache-resident, so this is NOT the eviction-based
+    serving-cold cost. For that (rank table evicted between reads, ~208-283us for r50k
+    tokenize), see 09_cold_tokenize's synthetic-evictor measurement."""
     t0 = time.perf_counter()
     fn()
     t1 = time.perf_counter()
