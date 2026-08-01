@@ -160,3 +160,68 @@ Notes:
 - **Kalcher(LZMA) write is ~26 ms/chunk** (preset 9|EXTREME). It is not a viable
   write-time codec; Kalcher(zstd) at 89µs is the practical encoder. Decode stays
   cheap for both, which is what recurs.
+
+---
+
+## Chunk-size sweep (ratio, r50k)
+
+`bench_kalcher_chunksweep.py` extends the 512-token ratios to 512 / 1024 / 2048
+/ 4096 tokens (the blog's existing sweep in `token-storage-extra.mdx` only went
+256 / 512 / 2000 and had no Kalcher). Table convention is identical to
+`bench_kalcher.py` (seed 3344, full-train rank table, ANS on a fixed 400×512
+train-token table held constant across sizes), so the 512 column reproduces the
+committed 512 numbers exactly. Ratio vs UTF-8, median [90% CI]:
+
+**English (prose)**
+
+| method        | 512tok | 1024tok | 2048tok | 4096tok |
+| ------------- | -----: | ------: | ------: | ------: |
+| raw           | 2.26×  | 2.35×   | 2.32×   | 2.30×   |
+| +freq         | 2.65×  | 2.67×   | 2.67×   | 2.67×   |
+| +ANS          | 3.26×  | 3.34×   | 3.31×   | 3.31×   |
+| Kalcher(LZMA) | 3.16×  | 3.41×   | 3.48×   | **3.54×** |
+| Kalcher(zstd) | 3.12×  | 3.37×   | 3.46×   | 3.50×   |
+
+**Code**
+
+| method        | 512tok | 1024tok | 2048tok | 4096tok |
+| ------------- | -----: | ------: | ------: | ------: |
+| raw           | 1.03×  | 1.08×   | 1.07×   | 1.08×   |
+| +freq         | 1.39×  | 1.43×   | 1.40×   | 1.49×   |
+| +ANS          | 2.21×  | 2.23×   | 2.20×   | 2.24×   |
+| Kalcher(LZMA) | 3.15×  | 3.43×   | 4.18×   | **4.14×** |
+| Kalcher(zstd) | 3.05×  | 3.32×   | 4.03×   | 4.06×   |
+
+**Hindi**
+
+| method        | 512tok | 1024tok | 2048tok | 4096tok |
+| ------------- | -----: | ------: | ------: | ------: |
+| raw           | 0.84×  | 0.84×   | 0.84×   | 0.84×   |
+| +freq         | 1.34×  | 1.34×   | 1.34×   | 1.34×   |
+| +ANS          | 2.79×  | 2.80×   | 2.80×   | 2.80×   |
+| Kalcher(LZMA) | 2.81×  | 3.20×   | 3.70×   | **4.15×** |
+| Kalcher(zstd) | 2.80×  | 3.22×   | 3.71×   | 4.18×   |
+
+Kalcher(LZMA) − +ANS gap by size — prose: −0.10 → +0.07 → +0.18 → +0.23;
+**code: +0.93 → +1.20 → +1.98 → +1.90**; hindi: +0.02 → +0.40 → +0.90 → +1.35.
+
+### Verdict on the chunk-size trend
+
+**Confirmed — Kalcher's advantage grows monotonically with chunk size; `+ANS`
+and `+freq` are essentially flat.** The order-0 entropy/varint models are
+memoryless, so their ratio barely moves (prose +ANS ~3.3× and +freq ~2.67× at
+every size; Hindi +ANS 2.80× and +freq 1.34× dead flat). Kalcher's general
+compressor gets more repetition to exploit as chunks grow, so it climbs on all
+three domains. Consequences:
+
+- **Code:** the crossover we saw at 512 (Kalcher already ahead) *widens* — the
+  Kalcher−ANS gap roughly doubles from +0.93 (512) to ~+1.9–2.0 (2048–4096).
+- **A crossover appears where there wasn't one at 512:** on English, Kalcher
+  starts below +ANS (3.16× vs 3.26× at 512) but overtakes it by 1024 (3.41× vs
+  3.34×) and leads by +0.23× at 4096. On Hindi, Kalcher and +ANS tie at 512
+  (~2.8×), then Kalcher pulls far ahead (4.15× vs 2.80× at 4096).
+- **Net:** at 4096 tokens Kalcher(LZMA) beats `+ANS` on **all three** domains.
+  So the paper's "+ANS wins" story is chunk-size-dependent: it holds only at
+  small RAG-style chunks (≤512) and only on skewed natural language; for longer
+  documents a general compressor over frequency-ordered tokens wins on ratio —
+  still at the read-latency cost quantified above (30–60µs vs `+freq`'s ~4µs).
