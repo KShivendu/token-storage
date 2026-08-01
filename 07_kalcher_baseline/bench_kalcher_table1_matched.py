@@ -21,8 +21,27 @@ import tiktoken
 import zstandard as zstd
 import constriction
 
-# Kalcher helpers, reused from bench_kalcher.py (LEB128 + zstd-22 + LZMA config)
-from bench_kalcher import leb128_encode, leb128_decode, zstd_c22, LZMA_FILTERS
+# Kalcher / +freq helpers, reused from bench_kalcher.py
+from bench_kalcher import leb128_encode, leb128_decode, zstd_c22, LZMA_FILTERS, svb_encode_arr
+
+ZSTD_DICT_SIZE = 112 * 1024
+_zdict_cache = {}  # domain -> ZstdCompressor with a FULL-train-split dictionary
+
+
+def full_train_zstd_compressor(domain, train_r50k):
+    """zstd level-19 compressor whose 112KB dictionary is trained on the domain's
+    FULL train split (cut into 512-token windows), not the blog's 400-sample
+    subset -- this is the train-dependent 'zstd --train' cell for the full-train
+    consistent table. Cached per domain. No numpy-RNG draw (keeps the aligned
+    run's chunk selection bit-identical)."""
+    if domain not in _zdict_cache:
+        samples = [
+            r50k.decode(train_r50k[i : i + 512].tolist()).encode("utf-8")
+            for i in range(0, (len(train_r50k) // 512) * 512, 512)
+        ]
+        zdict = zstd.ZstdCompressionDict(zstd.train_dictionary(ZSTD_DICT_SIZE, samples).as_bytes())
+        _zdict_cache[domain] = zstd.ZstdCompressor(level=19, dict_data=zdict)
+    return _zdict_cache[domain]
 
 CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
 DOMAINS = ["prose", "code", "hindi"]
@@ -341,6 +360,13 @@ def run_for_chunk_size(chunk_size):
             train_r50k = np.load(os.path.join(CORPUS_DIR, f"{domain}_train.npy")).astype(np.int64)
             train_text_cache[domain] = r50k.decode(train_r50k.tolist())
         train_text = train_text_cache[domain]
+        train_r50k_ids = np.load(os.path.join(CORPUS_DIR, f"{domain}_train.npy")).astype(np.int64)
+
+        # ── zstd --train, FULL-train dictionary (per-chunk, bootstrap later) ──
+        zc_full = full_train_zstd_compressor(domain, train_r50k_ids)
+        run_for_chunk_size.zstdtrain_raw[(chunk_size, domain)] = [
+            len(raw) / len(zc_full.compress(raw)) for raw in raw_byte_lists
+        ]
 
         for tok_key, (enc_name, vocab_size, container_bytes) in TOKENIZERS.items():
             enc = TOKENIZER_ENCODERS[tok_key]
@@ -384,6 +410,7 @@ def run_for_chunk_size(chunk_size):
 
             ans_ratios, ans_enc_t, ans_dec_t = [], [], []
             klzma_ratios, kzstd_ratios = [], []  # Kalcher, no RNG (bootstrap later)
+            freq_ratios = []  # +freq (streamvbyte), no RNG (bootstrap later)
             for raw, text, ids in zip(raw_byte_lists, texts, test_ids_list):
                 t0 = time.perf_counter()
                 ids2 = enc.encode(text, disallowed_special=())
@@ -407,6 +434,7 @@ def run_for_chunk_size(chunk_size):
                 # every +ANS/raw/byte number above stay bit-identical; Kalcher
                 # ratios are bootstrapped after the aligned run finishes.)
                 remapped = rank_of[np.asarray(ids2, dtype=np.int64)]
+                freq_ratios.append(len(raw) / len(svb_encode_arr(remapped)))  # +freq
                 varint = leb128_encode(remapped)
                 assert np.array_equal(leb128_decode(varint), remapped)
                 klzma_ratios.append(len(raw) / len(lzma.compress(varint, format=lzma.FORMAT_RAW, filters=LZMA_FILTERS)))
@@ -418,7 +446,8 @@ def run_for_chunk_size(chunk_size):
             }
             run_for_chunk_size.kalcher_raw[(chunk_size, domain, f"{tok_key} Kalcher(LZMA)")] = klzma_ratios
             run_for_chunk_size.kalcher_raw[(chunk_size, domain, f"{tok_key} Kalcher(zstd)")] = kzstd_ratios
-            print(f"  {tok_key} done (raw packing + static ANS + Kalcher)")
+            run_for_chunk_size.freq_raw[(chunk_size, domain, f"{tok_key} +freq")] = freq_ratios
+            print(f"  {tok_key} done (raw packing + static ANS + Kalcher + freq)")
 
     return ratio_results, latency_results
 
@@ -426,6 +455,8 @@ def run_for_chunk_size(chunk_size):
 run_for_chunk_size.model_cache = {}
 run_for_chunk_size.rank_cache = {}
 run_for_chunk_size.kalcher_raw = {}  # (cs, domain, method) -> per-chunk ratios
+run_for_chunk_size.freq_raw = {}     # (cs, domain, "{tok} +freq") -> per-chunk ratios
+run_for_chunk_size.zstdtrain_raw = {}  # (cs, domain) -> per-chunk ratios
 
 all_ratio, all_latency = {}, {}
 for cs in CHUNK_SIZES:
@@ -575,3 +606,98 @@ existing["table1_kalcher_matched"] = {
 with open(out_path, "w") as f:
     json.dump(existing, f, indent=2)
 print("\nMerged into results.json (table1_kalcher_matched)")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# PATH B: the COMPLETE Table 1 on ONE internally-consistent full-train setup.
+# Every cell measured in this single harness (seed 9012, full-train ANS +
+# full-train rank table + full-train zstd dict) on the identical 512-tok chunks.
+# ══════════════════════════════════════════════════════════════════════════
+freq_ci = {}
+for (cs2, d, mm), v in run_for_chunk_size.freq_raw.items():
+    if cs2 == CS:
+        freq_ci[(d, mm)] = bootstrap_ci(v)
+zstdtrain_ci = {d: bootstrap_ci(v) for (cs2, d), v in run_for_chunk_size.zstdtrain_raw.items() if cs2 == CS}
+
+# Table B row order (coordinator's method list)
+ROWS_B = [
+    ("LZ4", lambda d: r512[(d, "LZ4")][0]),
+    ("gzip-9", lambda d: r512[(d, "gzip-9")][0]),
+    ("zstd-19", lambda d: r512[(d, "zstd-19")][0]),
+    ("brotli-q11", lambda d: r512[(d, "brotli-q11")][0]),
+    ("zstd --train", lambda d: zstdtrain_ci[d][0]),
+    ("r50k raw", lambda d: r512[(d, "r50k raw")][0]),
+    ("o200k raw", lambda d: r512[(d, "o200k raw")][0]),
+    ("r50k +freq", lambda d: freq_ci[(d, "r50k +freq")][0]),
+    ("o200k +freq", lambda d: freq_ci[(d, "o200k +freq")][0]),
+    ("r50k +ANS", lambda d: r512[(d, "r50k +ANS")][0]),
+    ("cl100k +ANS", lambda d: r512[(d, "cl100k +ANS")][0]),
+    ("o200k +ANS", lambda d: r512[(d, "o200k +ANS")][0]),
+    ("cl100k Kalcher(LZMA)", lambda d: kalcher_ci[(d, "cl100k Kalcher(LZMA)")][0]),
+    ("cl100k Kalcher(zstd)", lambda d: kalcher_ci[(d, "cl100k Kalcher(zstd)")][0]),
+    ("o200k Kalcher(LZMA)", lambda d: kalcher_ci[(d, "o200k Kalcher(LZMA)")][0]),
+    ("o200k Kalcher(zstd)", lambda d: kalcher_ci[(d, "o200k Kalcher(zstd)")][0]),
+]
+
+print(f"\n{'=' * 78}\nPATH B -- COMPLETE Table 1, ONE full-train setup (512-tok), median\n{'=' * 78}")
+print(f"  {'method':<22}{'English':>10}{'Code':>10}{'Hindi':>10}")
+tableB = {}
+for name, fn in ROWS_B:
+    vals = {d: round(fn(d), 2) for d in DOMAINS}
+    tableB[name] = vals
+    print(f"  {name:<22}{vals['prose']:>9.2f}x{vals['code']:>9.2f}x{vals['hindi']:>9.2f}x")
+
+# ---- diff vs blog table (train-dependent cells expected to move) ----
+BLOG_512 = {  # published blog medians (prose, code, hindi)
+    "LZ4": (1.27, 1.76, 1.52), "gzip-9": (1.92, 2.46, 2.38), "zstd-19": (1.94, 2.45, 2.42),
+    "brotli-q11": (2.57, 2.87, 2.89), "zstd --train": (2.69, 3.24, 4.56),
+    "r50k raw": (2.25, 1.07, 0.84), "o200k raw": (1.59, 1.49, 2.55),
+    "r50k +freq": (2.62, 1.42, 1.33), "o200k +freq": (2.76, 2.53, 4.39),
+    "r50k +ANS": (3.30, 2.58, 2.97), "cl100k +ANS": (3.37, 3.19, 3.48), "o200k +ANS": (3.40, 3.16, 5.90),
+}
+# note: r50k +ANS blog English headline is 3.26 in the ENGLISH-ONLY script
+# (400-chunk ANS); the 3-domain blog table uses full-train -> 3.30.
+print(f"\n{'=' * 78}\nCELLS CHANGED vs BLOG TABLE (|Δ|>0.02x; train-dependent rows)\n{'=' * 78}")
+changes = []
+for name, _ in ROWS_B:
+    if name not in BLOG_512:
+        continue  # Kalcher rows are new; no blog value
+    for i, d in enumerate(DOMAINS):
+        got = tableB[name][d]
+        blog = BLOG_512[name][i]
+        if abs(got - blog) > 0.02:
+            changes.append((name, d, blog, got, got - blog))
+if not changes:
+    print("  (none beyond rounding)")
+for name, d, blog, got, delta in changes:
+    print(f"  {name:<22} {d:<6} {blog:.2f}x -> {got:.2f}x  ({delta:+.2f})")
+print("\n  Sanity: raw + non-trained byte codecs should be unchanged (|Δ|<=0.02):")
+for name in ["LZ4", "gzip-9", "zstd-19", "brotli-q11", "r50k raw", "o200k raw"]:
+    unchanged = all(abs(tableB[name][d] - BLOG_512[name][i]) <= 0.02 for i, d in enumerate(DOMAINS))
+    print(f"    {name:<12} {'UNCHANGED' if unchanged else 'MOVED (unexpected!)'}")
+
+with open(out_path) as f:
+    existing = json.load(f)
+existing["table1_full_train_consistent"] = {
+    "config": {
+        "harness": "same validated full-train harness (seed 9012); EVERY cell in one setup: "
+                   "full-train Laplace ANS, full-train rank table (+freq), full-train zstd dict, "
+                   "Kalcher LEB128+{LZMA9e,zstd22}; identical 512-tok chunks",
+        "chunk_size": CS, "n_chunks": N_CHUNKS, "seed": 9012,
+    },
+    "table_median": {name: tableB[name] for name, _ in ROWS_B},
+    "full_ci": {
+        **{f"{d}|{name}": r512[(d, name)] for name in
+           ["LZ4", "gzip-9", "zstd-19", "brotli-q11", "r50k raw", "o200k raw",
+            "r50k +ANS", "cl100k +ANS", "o200k +ANS"] for d in DOMAINS if (d, name) in r512},
+        **{f"{d}|zstd --train": zstdtrain_ci[d] for d in DOMAINS},
+        **{f"{d}|{m}": freq_ci[(d, m)] for (d, m) in freq_ci},
+        **{f"{d}|{tok} {m}": kalcher_ci[(d, f"{tok} {m}")]
+           for d in DOMAINS for tok in ["cl100k", "o200k"] for m in ["Kalcher(LZMA)", "Kalcher(zstd)"]},
+    },
+    "changed_vs_blog": [{"method": n, "domain": d, "blog": b, "full_train": g, "delta": round(dl, 3)}
+                        for n, d, b, g, dl in changes],
+}
+with open(out_path, "w") as f:
+    json.dump(existing, f, indent=2)
+print("\nMerged into results.json (table1_full_train_consistent)")
