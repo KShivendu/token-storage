@@ -220,12 +220,13 @@ def run_domain(domain, tok, enc, vocab, rng):
 
 
 def main():
-    rng = np.random.default_rng(SEED)
     results = {
         "config": {
             "tokenizers": list(TOKENIZERS), "chunk_size": CHUNK_SIZE, "n_chunks": N_CHUNKS,
             "reps": REPS, "seed": SEED,
-            "methodology": "matches Table 1 path B (seed 9012, full-train rank/ANS); dict trained "
+            "seed_scheme": "per-cell np.random.default_rng([SEED, tok_idx, domain_idx]) so each "
+                           "(tokenizer,domain) is reproducible and independent of run order",
+            "methodology": "matches Table 1 path B (full-train rank/ANS); dict trained "
                            "corpus-wide on TRAIN split varint samples, evaluated on held-out TEST",
             "decode_convention": "median-of-30 reps, decode to token IDs incl. LEB128 + rank un-permute",
             "dict_sizes_code": [d // 1024 for d in DICT_SIZES],
@@ -233,10 +234,11 @@ def main():
         },
         "grid": {},
     }
-    for tok, (enc_name, vocab) in TOKENIZERS.items():
+    for ti, (tok, (enc_name, vocab)) in enumerate(TOKENIZERS.items()):
         enc = tiktoken.get_encoding(enc_name)
         results["grid"][tok] = {}
-        for domain in ["code", "prose", "hindi"]:
+        for di, domain in enumerate(["code", "prose", "hindi"]):
+            rng = np.random.default_rng([SEED, ti, di])
             results["grid"][tok][domain] = run_domain(domain, tok, enc, vocab, rng)
 
     # ── summary grid: zstd --train on token IDs (112K dict) per tokenizer x domain ──
