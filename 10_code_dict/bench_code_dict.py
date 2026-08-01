@@ -45,7 +45,7 @@ import constriction
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from tnbench import (  # noqa: E402
     load_ids, make_chunks, bootstrap_ci, timed_reps, seeded_rng,
-    leb128_encode, leb128_decode, svb_encode_arr, svb_decode_arr,
+    leb128_encode, leb128_decode, svb_encode_arr, svb_decode_arr, pack3, unpack3,
     build_rank_table, build_ans_model, zstd_c22, zstd_d, LZMA_FILTERS,
 )
 
@@ -75,18 +75,28 @@ def run_domain(domain, tok, enc, vocab, rng):
     rank_of, token_of_rank = build_rank_table(train_ids, vocab)
     ans_model = build_ans_model(train_ids, vocab)
 
-    # ---- corpus-wide training samples: every 512-r50k-window of TRAIN, as
-    #      freq-remapped LEB128 varint bytes (same object as a test payload) ----
+    fits16 = vocab <= 65536
+
+    def pack_ids(ids):  # raw packing, same as the `raw` method (uint16 / 3-byte)
+        return ids.astype(np.uint16).tobytes() if fits16 else pack3(ids)
+
+    def unpack_ids(buf, n):
+        return np.frombuffer(buf, dtype=np.uint16).astype(np.int64) if fits16 else unpack3(buf, n)
+
+    # ---- corpus-wide training samples: every 512-r50k-window of TRAIN, built as
+    #      BOTH raw packed ID bytes (the +dict dictionary) AND freq-remapped
+    #      LEB128 varint bytes (the dict-freqvarint comparison dictionary) ----
     n_train_windows = len(train) // CHUNK_SIZE
     idxs = np.arange(n_train_windows)
     if n_train_windows > MAX_TRAIN_SAMPLES:
         idxs = rng.choice(n_train_windows, size=MAX_TRAIN_SAMPLES, replace=False)
-    samples = []
+    samples, samples_idbytes = [], []
     for i in idxs:
         w = train[i * CHUNK_SIZE:(i + 1) * CHUNK_SIZE]
         ids = np.array(enc.encode(r50k.decode(w.tolist()), disallowed_special=()), dtype=np.int64)
         samples.append(leb128_encode(rank_of[ids]))
-    print(f"  built {len(samples)} corpus-wide train samples (varint)", flush=True)
+        samples_idbytes.append(pack_ids(ids))
+    print(f"  built {len(samples)} corpus-wide train samples (varint + idbytes)", flush=True)
 
     # ---- held-out test chunks ----
     chunks = make_chunks(test, CHUNK_SIZE, N_CHUNKS, rng)
@@ -144,7 +154,9 @@ def run_domain(domain, tok, enc, vocab, rng):
         d.append(timed_reps(lambda p=payload: token_of_rank[leb128_decode(zstd_d.decompress(p))]))
     record("Kalcher (LEB128+zstd, no dict)", r, d)
 
-    # ---- THE EXPERIMENT: LEB128 + zstd WITH corpus-wide trained dict, swept ----
+    # ---- COMPARISON row (old pipeline): freq-remap -> LEB128 varint -> zstd-22
+    #      WITH corpus-wide trained dict. Kept only to measure how much the
+    #      freq-remap+varint preprocessing helps vs plain +dict below. ----
     for dsize in DOMAIN_PLAN[domain]:
         zdict_raw = zstd.train_dictionary(dsize, samples)
         zdict = zstd.ZstdCompressionDict(zdict_raw.as_bytes())
@@ -159,7 +171,7 @@ def run_domain(domain, tok, enc, vocab, rng):
             assert np.array_equal(dec, ids)
             r.append(raw / len(payload))
             d.append(timed_reps(lambda p=payload: token_of_rank[leb128_decode(zd.decompress(p))]))
-        record(f"dict-zstd ({dsize // 1024}K)", r, d, extra={"dict_bytes": actual})
+        record(f"dict-freqvarint ({dsize // 1024}K)", r, d, extra={"dict_bytes": actual})
 
     # ---- reference: byte-domain zstd --train (trained on TRAIN utf-8 chunks) ----
     byte_samples = [r50k.decode(train[i * CHUNK_SIZE:(i + 1) * CHUNK_SIZE].tolist()).encode("utf-8")
@@ -179,6 +191,26 @@ def run_domain(domain, tok, enc, vocab, rng):
            extra={"dict_bytes": len(bdict_raw.as_bytes()),
                   "note": "decode lands at TEXT; decode_us includes re-tokenize to reach token IDs"})
 
+    # ---- +dict (the paper's method): zstd-22 with a corpus-trained dict applied
+    #      DIRECTLY to the raw packed token-ID bytes (uint16 / 3-byte) -- NO
+    #      freq-remap, NO varint. The token-domain parallel of byte zstd --train.
+    #      Appended last so it doesn't perturb any RNG draw above. ----
+    for dsize in DOMAIN_PLAN[domain]:
+        zdict_raw = zstd.train_dictionary(dsize, samples_idbytes)
+        zdict = zstd.ZstdCompressionDict(zdict_raw.as_bytes())
+        actual = len(zdict_raw.as_bytes())
+        zc = zstd.ZstdCompressor(level=22, dict_data=zdict)
+        zd = zstd.ZstdDecompressor(dict_data=zdict)
+        r, d = [], []
+        for ids, raw in zip(test_ids, raw_lens):
+            packed = pack_ids(ids)
+            payload = zc.compress(packed)
+            dec = unpack_ids(zd.decompress(payload), len(ids))
+            assert np.array_equal(dec, ids)
+            r.append(raw / len(payload))
+            d.append(timed_reps(lambda p=payload, n=len(ids): unpack_ids(zd.decompress(p), n)))
+        record(f"dict-idbytes ({dsize // 1024}K)", r, d, extra={"dict_bytes": actual})
+
     return out
 
 
@@ -189,9 +221,13 @@ def main():
             "reps": REPS, "seed": SEED,
             "seed_scheme": "per-cell np.random.default_rng([SEED, tok_idx, domain_idx]) so each "
                            "(tokenizer,domain) is reproducible and independent of run order",
-            "methodology": "matches Table 1 path B (full-train rank/ANS); dict trained "
-                           "corpus-wide on TRAIN split varint samples, evaluated on held-out TEST",
-            "decode_convention": "median-of-30 reps, decode to token IDs incl. LEB128 + rank un-permute",
+            "methodology": "matches Table 1 path B (full-train rank/ANS). +dict (dict-idbytes) = "
+                           "zstd-22 with a corpus-trained dict on the RAW PACKED token-ID bytes (uint16/"
+                           "3-byte), no freq-remap/varint -- the token-domain parallel of byte zstd --train. "
+                           "dict-freqvarint = old comparison pipeline (freq-remap + LEB128 varint + dict). "
+                           "Dicts trained corpus-wide on TRAIN windows, evaluated on held-out TEST.",
+            "decode_convention": "median-of-30 reps, decode to token IDs; +dict = zstd decompress + unpack; "
+                                 "dict-freqvarint = zstd decompress + LEB128 + rank un-permute",
             "dict_sizes_code": [d // 1024 for d in DICT_SIZES],
             "max_train_samples": MAX_TRAIN_SAMPLES,
         },
@@ -204,16 +240,17 @@ def main():
             rng = seeded_rng(SEED, ti, di)
             results["grid"][tok][domain] = run_domain(domain, tok, enc, vocab, rng)
 
-    # ── summary grid: zstd --train on token IDs (112K dict) per tokenizer x domain ──
-    print(f"\n{'=' * 90}\nzstd --train ON TOKEN IDs (112K dict) -- ratio per tokenizer x domain\n{'=' * 90}")
-    print(f"  {'tok':<8}{'domain':<8}{'no-dict':>9}{'dict-112K':>11}{'delta':>8}{'Kalcher-LZMA':>14}")
+    # ── summary grid: +dict (plain, on token-ID bytes) vs old freq-remap+varint
+    #    dict, per tokenizer x domain (both 112K), + Kalcher-LZMA reference ──
+    print(f"\n{'=' * 96}\n+dict (zstd --train on token-ID bytes, 112K) vs old freqvarint dict -- ratio\n{'=' * 96}")
+    print(f"  {'tok':<8}{'domain':<8}{'+dict':>9}{'freqvarint':>12}{'freq-remap Δ':>14}{'Kalcher-LZMA':>14}")
     for tok in TOKENIZERS:
         for domain in ["code", "prose", "hindi"]:
             md = results["grid"][tok][domain]["methods"]
-            nd = md["Kalcher (LEB128+zstd, no dict)"]["ratio"][0]
-            dd = md["dict-zstd (112K)"]["ratio"][0]
+            plain = md["dict-idbytes (112K)"]["ratio"][0]
+            fv = md["dict-freqvarint (112K)"]["ratio"][0]
             kl = md["Kalcher (LEB128+LZMA)"]["ratio"][0]
-            print(f"  {tok:<8}{domain:<8}{nd:>8.2f}x{dd:>10.2f}x{dd - nd:>+7.2f}x{kl:>13.2f}x")
+            print(f"  {tok:<8}{domain:<8}{plain:>8.2f}x{fv:>11.2f}x{fv - plain:>+13.2f}x{kl:>13.2f}x")
 
     out_path = os.path.join(os.path.dirname(__file__), "results.json")
     with open(out_path, "w") as f:

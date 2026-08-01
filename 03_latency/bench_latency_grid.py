@@ -10,13 +10,16 @@ For every token-ID compression method, BOTH agent directions, across all three
 tiktoken tokenizers (r50k/cl100k/o200k) and all three domains:
 
   agent WRITE = from token IDs -> stored bytes (encode; incl. codec compress).
-  agent READ  = from stored bytes -> token IDs (decode; incl. codec decode +
-                LEB128 + rank un-permute for +freq / +dict / Kalcher).
+  agent READ  = from stored bytes -> token IDs (decode; incl. codec decode; +
+                LEB128 + rank un-permute for +freq / Kalcher / dict-freqvarint).
 
 Token methods:  raw pack, +freq (streamvbyte), +ANS, +dict (zstd-22 with a 112K
-corpus-trained dictionary over freq-remapped LEB128 varints), Kalcher(zstd-22),
-Kalcher(LZMA). The +dict WRITE latency (zstd-22-with-dict compress of the varint)
-was not timed anywhere before -- it is measured here.
+corpus-trained dictionary applied DIRECTLY to the raw packed token-ID bytes,
+uint16/3-byte -- the token-domain parallel of byte zstd --train; no freq-remap,
+no varint; read = decompress + unpack), Kalcher(zstd-22), Kalcher(LZMA), and
+dict-freqvarint (the OLD +dict pipeline: freq-remap + LEB128 varint + dict, kept
+only as a comparison row). The +dict WRITE latency (pack + dict-compress) was
+not timed anywhere before -- it is measured here.
 
 Byte-codec reference (tokenizer-independent, measured once per domain on the
 r50k chunk sample): LZ4 / gzip-9 / zstd-19 / brotli-q11 / zstd --train, reported
@@ -63,26 +66,36 @@ N_CHUNKS = 40
 SEED = 9012                     # match Table 1 path B / 10_code_dict
 DICT_SIZE = 112 * 1024          # token-ID zstd --train dict
 DICT_TRAIN_SAMPLES = 8000       # bounded pool of train windows for the dict
-TOKEN_METHODS = ["raw", "+freq", "+ANS", "+dict", "Kalcher(zstd)", "Kalcher(LZMA)"]
+# dict-freqvarint (old freq-remap+LEB128+dict comparison) is appended LAST so its
+# bootstrap draws don't perturb the RNG order of the other methods.
+TOKEN_METHODS = ["raw", "+freq", "+ANS", "+dict", "Kalcher(zstd)", "Kalcher(LZMA)", "dict-freqvarint"]
 BYTE_CODECS = ["LZ4", "gzip-9", "zstd-19", "brotli-q11", "zstd --train"]
 
 r50k = tiktoken.get_encoding("r50k_base")
 
 
-def build_token_dict(train, enc, rank_of, is_r50k, rng):
-    """112K zstd dict trained corpus-wide on freq-remapped LEB128 varints of the
-    train split's 512-token windows (same object shape as a stored payload)."""
+def _mk_dict(samples):
+    zdict = zstd.ZstdCompressionDict(zstd.train_dictionary(DICT_SIZE, samples).as_bytes())
+    return zstd.ZstdCompressor(level=22, dict_data=zdict), zstd.ZstdDecompressor(dict_data=zdict)
+
+
+def build_token_dicts(train, enc, rank_of, is_r50k, fits16, rng):
+    """Two 112K zstd dicts trained corpus-wide on the same TRAIN 512-token windows
+    (one rng.choice, so chunk selection downstream is unchanged):
+      idbytes -> +dict:          raw packed token-ID bytes (uint16 / 3-byte).
+      varint  -> dict-freqvarint: freq-remapped LEB128 varint bytes (old pipeline).
+    Returns ((zc_idb, zd_idb), (zc_var, zd_var))."""
     n_windows = len(train) // CHUNK_SIZE
     idxs = np.arange(n_windows)
     if n_windows > DICT_TRAIN_SAMPLES:
         idxs = rng.choice(n_windows, size=DICT_TRAIN_SAMPLES, replace=False)
-    samples = []
+    s_idb, s_var = [], []
     for i in idxs:
         w = train[i * CHUNK_SIZE:(i + 1) * CHUNK_SIZE]
         ids = w if is_r50k else np.array(enc.encode(r50k.decode(w.tolist()), disallowed_special=()), dtype=np.int64)
-        samples.append(leb128_encode(rank_of[ids]))
-    zdict = zstd.ZstdCompressionDict(zstd.train_dictionary(DICT_SIZE, samples).as_bytes())
-    return zstd.ZstdCompressor(level=22, dict_data=zdict), zstd.ZstdDecompressor(dict_data=zdict)
+        s_idb.append(ids.astype(np.uint16).tobytes() if fits16 else pack3(ids))
+        s_var.append(leb128_encode(rank_of[ids]))
+    return _mk_dict(s_idb), _mk_dict(s_var)
 
 
 def byte_codec_components(texts, train, rng):
@@ -128,8 +141,14 @@ def run_cell(domain, tok, enc, vocab, is_r50k, rng):
     train_ids = train if is_r50k else np.array(enc.encode(r50k.decode(train.tolist()), disallowed_special=()), dtype=np.int64)
     rank_of, token_of_rank = build_rank_table(train_ids, vocab)
     ans_model = build_ans_model(train_ids, vocab)
-    zc_dict, zd_dict = build_token_dict(train, enc, rank_of, is_r50k, rng)
     fits16 = vocab <= 65536
+    (zc_idb, zd_idb), (zc_var, zd_var) = build_token_dicts(train, enc, rank_of, is_r50k, fits16, rng)
+
+    def pack_ids(i):
+        return i.astype(np.uint16).tobytes() if fits16 else pack3(i)
+
+    def unpack_ids(buf, n):
+        return np.frombuffer(buf, dtype=np.uint16).astype(np.int64) if fits16 else unpack3(buf, n)
 
     chunks = make_chunks(test, CHUNK_SIZE, N_CHUNKS, rng)
     texts = [r50k.decode(c.tolist()) for c in chunks]
@@ -184,11 +203,14 @@ def run_cell(domain, tok, enc, vocab, is_r50k, rng):
         read["+ANS"].append(timed_reps(ans_read))
         ratio["+ANS"].append(raw_len / len(ansp))
 
-        # ---- +dict (zstd-22 with corpus-trained token-ID dict) ----
-        dictp = zc_dict.compress(varint)
-        assert np.array_equal(token_of_rank[leb128_decode(zd_dict.decompress(dictp))], ids)
-        write["+dict"].append(timed_reps(lambda i=ids: zc_dict.compress(leb128_encode(rank_of[i]))))
-        read["+dict"].append(timed_reps(lambda p=dictp: token_of_rank[leb128_decode(zd_dict.decompress(p))]))
+        # ---- +dict (paper): zstd-22 dict applied DIRECTLY to raw packed token-ID
+        #      bytes (uint16 / 3-byte). No freq-remap, no varint. write = pack +
+        #      dict-compress; read = dict-decompress + unpack. ----
+        packed = pack_ids(ids)
+        dictp = zc_idb.compress(packed)
+        assert np.array_equal(unpack_ids(zd_idb.decompress(dictp), n), ids)
+        write["+dict"].append(timed_reps(lambda i=ids: zc_idb.compress(pack_ids(i))))
+        read["+dict"].append(timed_reps(lambda p=dictp, n=n: unpack_ids(zd_idb.decompress(p), n)))
         ratio["+dict"].append(raw_len / len(dictp))
 
         # ---- Kalcher(zstd-22, no dict) ----
@@ -204,6 +226,13 @@ def run_cell(domain, tok, enc, vocab, is_r50k, rng):
         read["Kalcher(LZMA)"].append(timed_reps(
             lambda p=klp: token_of_rank[leb128_decode(lzma.decompress(p, format=lzma.FORMAT_RAW, filters=LZMA_FILTERS))]))
         ratio["Kalcher(LZMA)"].append(raw_len / len(klp))
+
+        # ---- dict-freqvarint (comparison): old freq-remap + LEB128 + dict pipeline ----
+        fvp = zc_var.compress(varint)
+        assert np.array_equal(token_of_rank[leb128_decode(zd_var.decompress(fvp))], ids)
+        write["dict-freqvarint"].append(timed_reps(lambda i=ids: zc_var.compress(leb128_encode(rank_of[i]))))
+        read["dict-freqvarint"].append(timed_reps(lambda p=fvp: token_of_rank[leb128_decode(zd_var.decompress(p))]))
+        ratio["dict-freqvarint"].append(raw_len / len(fvp))
 
     methods = {m: {"write_us": bootstrap_ci(write[m], rng),
                    "read_us": bootstrap_ci(read[m], rng),
@@ -260,11 +289,12 @@ def main():
             "chunk_size": CHUNK_SIZE, "n_chunks": N_CHUNKS, "seed": SEED,
             "tokenizers": list(TOKENIZERS), "domains": DOMAINS,
             "token_methods": TOKEN_METHODS, "byte_codecs": BYTE_CODECS,
-            "dict": f"zstd-22, {DICT_SIZE // 1024}K, corpus-trained on freq-remapped LEB128 varints",
+            "dict": f"+dict = zstd-22, {DICT_SIZE // 1024}K, corpus-trained on RAW PACKED token-ID "
+                    "bytes (uint16/3-byte); dict-freqvarint = old comparison (freq-remap+LEB128 varint)",
             "seed_scheme": "per-cell default_rng([SEED, tok_idx, domain_idx])",
             "timing": "codec ops warm median-of-30 (timed_reps); tokenize/detokenize serving-cold single shot (timed_once)",
-            "read": "to token IDs incl. codec decode + LEB128 + rank un-permute",
-            "write": "from token IDs incl. codec compress",
+            "read": "to token IDs incl. codec decode (+dict: unpack; +freq/Kalcher/dict-freqvarint: LEB128 + rank un-permute)",
+            "write": "from token IDs incl. codec compress (+dict: pack + compress)",
         },
         "grid": grid,
         "byte_codecs": byte_ref,
