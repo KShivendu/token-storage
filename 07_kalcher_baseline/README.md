@@ -349,3 +349,30 @@ Net blast radius of switching to a single full-train table: essentially nil for
 raw/byte/+ANS/+freq, one meaningful +0.23× bump for zstd --train on code, and a
 consistent 3.30× English r50k+ANS headline in place of the 3.26× from the
 retired English-only harness.
+
+---
+
+## Section 5.2 — English +ANS across six tokenizers, on full-train
+
+The paper's "generality across tokenizers" paragraph listed English +ANS on the
+old 400-chunk setup; recomputed here on the **same full-train harness** (seed
+9012) so it is consistent with the full-train Table 1. The tiktoken three come
+straight from the aligned run (bit-identical to Table 1); the three HF
+tokenizers use the `02_multi_tokenizer` configs, full-train Laplace(+1) ANS,
+vocab-clipped ids (matching `bench_tokenizer_gen.py`), on the identical
+prose-512 chunks. English (C4), 512-token chunks:
+
+| tokenizer   | full-train English +ANS [90% CI] | (old 400-chunk) |
+| ----------- | -------------------------------: | --------------: |
+| r50k        | 3.30× [3.20, 3.40]               | 3.26× |
+| cl100k      | 3.37× [3.25, 3.45]               | 3.27× |
+| o200k       | 3.40× [3.28, 3.46]               | 3.18× |
+| Qwen2.5     | 3.36× [3.23, 3.42]               | 3.18× |
+| DeepSeek-V2 | 3.32× [3.21, 3.39]               | 3.20× |
+| Gemma-2     | 3.37× [3.27, 3.46]               | 3.12× |
+
+**Min–max band: 3.30× – 3.40×** (all six within a 0.10× spread). Full-train
+tightens and lifts the band vs the old 400-chunk numbers (which spanned
+3.12–3.27×): every tokenizer gains ~0.1–0.2× from the larger frequency table,
+and the "all modern LLM tokenizers land in one tight band" claim is *stronger*
+on full-train — the band is now ~3.3–3.4× regardless of vendor or vocab size.

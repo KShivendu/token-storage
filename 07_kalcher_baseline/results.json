@@ -2021,5 +2021,63 @@
         "delta": 0.08
       }
     ]
+  },
+  "sec52_fulltrain_english_ans": {
+    "config": {
+      "domain": "prose (English C4)",
+      "chunk_size": 512,
+      "n_chunks": 40,
+      "seed": 9012,
+      "ans": "full-train Laplace(+1) unigram; HF ids vocab-clipped (matches 02_multi_tokenizer/bench_tokenizer_gen.py)",
+      "note": "tiktoken 3 are the aligned-run Table 1 values (bit-identical); HF 3 on the identical prose-512 chunks"
+    },
+    "ratio": {
+      "r50k": [
+        3.296237824675325,
+        [
+          3.1963979632990522,
+          3.3961089688185626
+        ]
+      ],
+      "cl100k": [
+        3.3731681400884055,
+        [
+          3.2548076923076925,
+          3.452956989247312
+        ]
+      ],
+      "o200k": [
+        3.4002719155844154,
+        [
+          3.282695374800638,
+          3.4637113632969987
+        ]
+      ],
+      "Qwen2.5": [
+        3.358114035087719,
+        [
+          3.2342630174052944,
+          3.4226031321619557
+        ]
+      ],
+      "DeepSeek-V2": [
+        3.315172589332633,
+        [
+          3.2075452337791157,
+          3.389395651705952
+        ]
+      ],
+      "Gemma-2": [
+        3.3652309612983773,
+        [
+          3.2691176470588235,
+          3.462345987345987
+        ]
+      ]
+    },
+    "min_max_band": {
+      "min": 3.296237824675325,
+      "max": 3.4002719155844154
+    }
   }
 }

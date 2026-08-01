@@ -324,6 +324,10 @@ def run_for_chunk_size(chunk_size):
         chunks_r50k = make_chunks(test_r50k, chunk_size, N_CHUNKS)
         texts = [r50k.decode(c.tolist()) for c in chunks_r50k]
         raw_byte_lists = [t.encode("utf-8") for t in texts]
+        # capture the EXACT aligned prose-512 chunks for the Sec 5.2 recompute
+        if domain == "prose" and chunk_size == 512:
+            run_for_chunk_size.prose512_texts = list(texts)
+            run_for_chunk_size.prose512_raw = list(raw_byte_lists)
         print(f"  {len(texts)} test chunks reconstructed")
         if len(texts) < 5:
             print(f"  SKIP {domain}: not enough tokens for chunk_size={chunk_size}")
@@ -701,3 +705,71 @@ existing["table1_full_train_consistent"] = {
 with open(out_path, "w") as f:
     json.dump(existing, f, indent=2)
 print("\nMerged into results.json (table1_full_train_consistent)")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SECTION 5.2: English +ANS across SIX tokenizers, on the full-train setup.
+# tiktoken 3 come from the aligned run (reproduce Table 1's 3.30/3.37/3.40);
+# HF 3 (Qwen2.5, DeepSeek-V2, Gemma-2) computed here on the IDENTICAL prose-512
+# chunks, full-train ANS, matching 02_multi_tokenizer/bench_tokenizer_gen.py's
+# per-tokenizer methodology (Laplace(+1) unigram, vocab-clipped ids).
+# ══════════════════════════════════════════════════════════════════════════
+from transformers import AutoTokenizer  # noqa: E402
+
+prose_texts = run_for_chunk_size.prose512_texts
+prose_raw = run_for_chunk_size.prose512_raw
+prose_train_text = train_text_cache["prose"]  # full prose train, decoded
+
+sec52 = {}
+# tiktoken three: reuse the aligned-run +ANS (bit-identical to Table 1)
+for tk in ["r50k", "cl100k", "o200k"]:
+    sec52[tk] = r512[("prose", f"{tk} +ANS")]
+
+HF_TOKENIZERS = {
+    "Qwen2.5": "Qwen/Qwen2.5-7B",
+    "DeepSeek-V2": "deepseek-ai/DeepSeek-V2-Lite",
+    "Gemma-2": "google/gemma-2-9b",
+}
+for label, hf_name in HF_TOKENIZERS.items():
+    tok = AutoTokenizer.from_pretrained(hf_name, trust_remote_code=True)
+    vocab_size = tok.vocab_size
+    # full-train ANS table
+    train_ids = np.array(tok.encode(prose_train_text, add_special_tokens=False), dtype=np.int64)
+    train_ids = train_ids[(train_ids >= 0) & (train_ids < vocab_size)]
+    counts = np.ones(vocab_size, dtype=np.int64) + np.bincount(train_ids, minlength=vocab_size)
+    probs = counts.astype(np.float64) / counts.sum()
+    model = constriction.stream.model.Categorical(probs, perfect=False)
+
+    ratios = []
+    for raw, text in zip(prose_raw, prose_texts):
+        ids = np.array(tok.encode(text, add_special_tokens=False), dtype=np.int64)
+        ids32 = np.clip(ids, 0, vocab_size - 1).astype(np.int32)
+        c = constriction.stream.stack.AnsCoder()
+        c.encode_reverse(ids32, model)
+        ratios.append(len(raw) / len(c.get_compressed().tobytes()))
+    sec52[label] = bootstrap_ci(ratios)
+    print(f"  {label:<12} full-train English +ANS = {sec52[label][0]:.2f}x")
+
+order52 = ["r50k", "cl100k", "o200k", "Qwen2.5", "DeepSeek-V2", "Gemma-2"]
+meds = [sec52[t][0] for t in order52]
+band = (min(meds), max(meds))
+print(f"\n{'=' * 66}\nSEC 5.2 -- English (C4) +ANS, full-train, six tokenizers (512-tok)\n{'=' * 66}")
+for t in order52:
+    v = sec52[t]
+    print(f"  {t:<12} {v[0]:.2f}x [{v[1][0]:.2f}, {v[1][1]:.2f}]")
+print(f"  --> min-max band: {band[0]:.2f}x - {band[1]:.2f}x")
+
+with open(out_path) as f:
+    existing = json.load(f)
+existing["sec52_fulltrain_english_ans"] = {
+    "config": {"domain": "prose (English C4)", "chunk_size": CS, "n_chunks": N_CHUNKS,
+               "seed": 9012, "ans": "full-train Laplace(+1) unigram; HF ids vocab-clipped "
+               "(matches 02_multi_tokenizer/bench_tokenizer_gen.py)",
+               "note": "tiktoken 3 are the aligned-run Table 1 values (bit-identical); "
+                       "HF 3 on the identical prose-512 chunks"},
+    "ratio": {t: sec52[t] for t in order52},
+    "min_max_band": {"min": band[0], "max": band[1]},
+}
+with open(out_path, "w") as f:
+    json.dump(existing, f, indent=2)
+print("\nMerged into results.json (sec52_fulltrain_english_ans)")
