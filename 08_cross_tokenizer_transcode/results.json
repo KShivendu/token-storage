@@ -1,0 +1,140 @@
+{
+  "config": {
+    "corpus": "prose (English C4)",
+    "chunk_size": 512,
+    "n_chunks": 40,
+    "reps": 25,
+    "seed": 3344,
+    "single_core": true,
+    "metric": "median us/chunk, bootstrap 90% CI",
+    "correctness_ground_truth": "target.encode(source.decode(text)) == target.encode(text)"
+  },
+  "directions": {
+    "r50k->o200k": {
+      "direction": "r50k->o200k",
+      "decode_only_us": [
+        7.522501618950628,
+        [
+          7.335500413319096,
+          7.57549969421234
+        ]
+      ],
+      "encode_only_us": [
+        71.16450069588609,
+        [
+          70.60099960654043,
+          72.4220008123666
+        ]
+      ],
+      "baseline": {
+        "us": [
+          80.36200051719788,
+          [
+            79.85500087670516,
+            81.40149839164224
+          ]
+        ],
+        "exact_match_rate": 1.0
+      },
+      "per_token": {
+        "us": [
+          13.132497770129703,
+          [
+            12.910999430459924,
+            13.237999155535363
+          ]
+        ],
+        "chunk_exact_match_rate": 0.0,
+        "token_level_agreement": 0.05162368672397326,
+        "lut_entries": 50257,
+        "lut_target_ids": 58309,
+        "lut_mem_bytes_approx": 635292,
+        "build_us": 75329.62600089377,
+        "correct_with_verify_fallback_us": 93.49449828732759,
+        "fallback_rate_to_reach_100pct": 1.0
+      },
+      "per_piece": {
+        "us": [
+          200.58049994986504,
+          [
+            197.22099932550918,
+            201.9299990934087
+          ]
+        ],
+        "exact_match_rate": 1.0,
+        "piece_hit_rate_warm": 1.0,
+        "cache_entries": 208109,
+        "cache_target_ids": 426302,
+        "cache_mem_bytes_approx": 15024184
+      },
+      "speedup_vs_baseline": {
+        "per_token_raw": 6.11932337045462,
+        "per_token_correct": 0.859537213304564,
+        "per_piece": 0.40064712440782785
+      }
+    },
+    "o200k->r50k": {
+      "direction": "o200k->r50k",
+      "decode_only_us": [
+        7.316499250009656,
+        [
+          7.255001037265174,
+          7.517000994994305
+        ]
+      ],
+      "encode_only_us": [
+        106.21749970596284,
+        [
+          105.50100159889553,
+          106.70059946278343
+        ]
+      ],
+      "baseline": {
+        "us": [
+          116.60749987640884,
+          [
+            114.70400022517424,
+            117.94000056397635
+          ]
+        ],
+        "exact_match_rate": 1.0
+      },
+      "per_token": {
+        "us": [
+          12.644999515032396,
+          [
+            12.574000720633194,
+            12.776499715982936
+          ]
+        ],
+        "chunk_exact_match_rate": 0.025,
+        "token_level_agreement": 0.17604995947942986,
+        "lut_entries": 200019,
+        "lut_target_ids": 654061,
+        "lut_mem_bytes_approx": 4216396,
+        "build_us": 434588.42000109144,
+        "correct_with_verify_fallback_us": 129.25249939144123,
+        "fallback_rate_to_reach_100pct": 0.975
+      },
+      "per_piece": {
+        "us": [
+          157.85600226081442,
+          [
+            155.01249981753062,
+            159.1694981470937
+          ]
+        ],
+        "exact_match_rate": 1.0,
+        "piece_hit_rate_warm": 1.0,
+        "cache_entries": 197576,
+        "cache_target_ids": 466402,
+        "cache_mem_bytes_approx": 14510472
+      },
+      "speedup_vs_baseline": {
+        "per_token_raw": 9.221629446310825,
+        "per_token_correct": 0.9021682398826424,
+        "per_piece": 0.7386953819072805
+      }
+    }
+  }
+}
