@@ -9,52 +9,37 @@ across all 40 test chunks x 30 reps each (same robust methodology as the
 other fixed benchmarks).
 """
 import os
-import time
+import sys
 import numpy as np
 import tiktoken
 import zstandard as zstd
 
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import tnbench as T
+from tnbench import timed_reps, load_ids
+
 DOMAINS = ["prose", "code", "hindi"]
 CHUNK_SIZE = 512
 N_CHUNKS = 40
 REPS = 30
-N_BOOTSTRAP = 2000
 RNG = np.random.default_rng(3344)
 
 r50k = tiktoken.get_encoding("r50k_base")
 
 
-def bootstrap_ci(values, n_boot=N_BOOTSTRAP, alpha=0.10):
-    values = np.asarray(values, dtype=np.float64)
-    idx = RNG.integers(0, len(values), size=(n_boot, len(values)))
-    boot_medians = np.median(values[idx], axis=1)
-    lo, hi = np.percentile(boot_medians, [100 * alpha / 2, 100 * (1 - alpha / 2)])
-    return float(np.median(values)), (float(lo), float(hi))
+def bootstrap_ci(values):
+    return T.bootstrap_ci(values, RNG)
 
 
 def make_chunks(test_arr, chunk_size, n_chunks):
-    max_chunks = len(test_arr) // chunk_size
-    n = min(n_chunks, max_chunks)
-    starts = RNG.choice(max_chunks, size=n, replace=False) * chunk_size
-    return [test_arr[s: s + chunk_size] for s in starts]
-
-
-def timed_reps(fn, reps=REPS):
-    ts = []
-    for _ in range(reps):
-        t0 = time.perf_counter()
-        fn()
-        t1 = time.perf_counter()
-        ts.append((t1 - t0) * 1e6)
-    return float(np.median(ts))
+    return T.make_chunks(test_arr, chunk_size, n_chunks, RNG)
 
 
 results = {}
 for domain in DOMAINS:
     print(f"=== {domain} ===", flush=True)
-    train_r50k = np.load(os.path.join(CORPUS_DIR, f"{domain}_train.npy")).astype(np.int64)
-    test_r50k = np.load(os.path.join(CORPUS_DIR, f"{domain}_test.npy")).astype(np.int64)
+    train_r50k = load_ids(f"{domain}_train")
+    test_r50k = load_ids(f"{domain}_test")
 
     chunks_r50k = make_chunks(test_r50k, CHUNK_SIZE, N_CHUNKS)
     texts = [r50k.decode(c.tolist()) for c in chunks_r50k]

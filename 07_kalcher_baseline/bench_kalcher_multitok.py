@@ -20,22 +20,20 @@ column reproduces the published numbers:
 Reuses leb128_encode / zstd / LZMA settings from bench_kalcher.py.
 """
 import os
+import sys
 import json
 import lzma
 import numpy as np
 import tiktoken
-import zstandard as zstd
 import constriction
 
-from bench_kalcher import (
-    leb128_encode,
-    leb128_decode,
-    zstd_c22,
-    LZMA_FILTERS,
-    bootstrap_ci,
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tnbench import (
+    load_ids, make_chunks, bootstrap_ci,
+    leb128_encode, leb128_decode, build_rank_table, build_ans_model,
+    zstd_c22, LZMA_FILTERS,
 )
 
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
 DOMAINS = ["prose", "code", "hindi"]
 CHUNK_SIZE = 512
 N_CHUNKS = 40
@@ -45,13 +43,6 @@ TOKENIZERS = {"r50k": ("r50k_base", 50257), "cl100k": ("cl100k_base", 100277), "
 r50k = tiktoken.get_encoding("r50k_base")
 
 
-def make_chunks(test_arr, chunk_size, n_chunks, rng):
-    max_chunks = len(test_arr) // chunk_size
-    n = min(n_chunks, max_chunks)
-    starts = rng.choice(max_chunks, size=n, replace=False) * chunk_size
-    return [test_arr[s : s + chunk_size] for s in starts]
-
-
 def main():
     rng = np.random.default_rng(SEED)
     results = {}  # (domain, tok, method) -> ratio ci
@@ -59,8 +50,8 @@ def main():
 
     for domain in DOMAINS:
         print(f"=== {domain} ===", flush=True)
-        train_r50k = np.load(os.path.join(CORPUS_DIR, f"{domain}_train.npy")).astype(np.int64)
-        test_r50k = np.load(os.path.join(CORPUS_DIR, f"{domain}_test.npy")).astype(np.int64)
+        train_r50k = load_ids(f"{domain}_train")
+        test_r50k = load_ids(f"{domain}_test")
         if domain not in train_text_cache:
             train_text_cache[domain] = r50k.decode(train_r50k.tolist())
         train_text = train_text_cache[domain]
@@ -74,14 +65,8 @@ def main():
 
             # full-train frequency: rank table (Kalcher/+freq) + ANS model
             train_ids = np.array(enc.encode(train_text, disallowed_special=()), dtype=np.int64)
-            counts = np.bincount(train_ids, minlength=vocab_size)
-            order = np.argsort(-counts)
-            rank_of = np.empty(vocab_size, dtype=np.uint32)
-            rank_of[order] = np.arange(vocab_size, dtype=np.uint32)
-
-            ans_counts = np.ones(vocab_size, dtype=np.int64) + counts
-            ans_probs = ans_counts.astype(np.float64) / ans_counts.sum()
-            ans_model = constriction.stream.model.Categorical(ans_probs, perfect=False)
+            rank_of, _ = build_rank_table(train_ids, vocab_size)
+            ans_model = build_ans_model(train_ids, vocab_size)
 
             ans_r, klzma_r, kzstd_r = [], [], []
             for text, raw_len in zip(texts, raw_lens):

@@ -1,13 +1,16 @@
+import os
+import sys
 import numpy as np
 import tiktoken
 from scipy.stats import spearmanr
-import os
 
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tnbench import load_ids
+
 r50k = tiktoken.get_encoding("r50k_base")
 VOCAB = 50257
 
-train_ids = np.load(os.path.join(CORPUS_DIR, "prose_train.npy")).astype(np.int64)
+train_ids = load_ids("prose_train")
 train_text = r50k.decode(train_ids[:400*512].tolist())
 train_tok_ids = r50k.encode(train_text, disallowed_special=())
 

@@ -6,31 +6,29 @@ freq-remap+streamvbyte, to isolate how much of +freq's ratio comes from the
 rank-remap step itself vs the streamvbyte codec.
 """
 import os
+import sys
 import numpy as np
 import tiktoken
 import zstandard as zstd
-import pyfastpfor
 import constriction
 
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tnbench import make_chunks as _make_chunks, svb_encode_arr, build_rank_table, load_ids
+
 CHUNK_SIZE = 512
 N_CHUNKS = 40
 RNG = np.random.default_rng(3344)
 
 r50k = tiktoken.get_encoding("r50k_base")
 VOCAB = 50257
-svb_codec = pyfastpfor.getCodec("streamvbyte")
 
-train_ids = np.load(os.path.join(CORPUS_DIR, "prose_train.npy")).astype(np.int64)
-test_ids = np.load(os.path.join(CORPUS_DIR, "prose_test.npy")).astype(np.int64)
+train_ids = load_ids("prose_train")
+test_ids = load_ids("prose_test")
 train_text = r50k.decode(train_ids[: 400 * CHUNK_SIZE].tolist())
 
 
 def make_chunks(test_arr, chunk_size, n_chunks):
-    max_chunks = len(test_arr) // chunk_size
-    n = min(n_chunks, max_chunks)
-    starts = RNG.choice(max_chunks, size=n, replace=False) * chunk_size
-    return [test_arr[s: s + chunk_size] for s in starts]
+    return _make_chunks(test_arr, chunk_size, n_chunks, RNG)
 
 
 chunks = make_chunks(test_ids, CHUNK_SIZE, N_CHUNKS)
@@ -75,12 +73,6 @@ for c in chunks:
 ans_tok_ratio = np.median(raw_byte_lens / np.array(ans_tok_sizes))
 
 # ── streamvbyte WITHOUT rank-remap (plain BPE merge-order IDs) ───────────────
-def svb_encode_arr(arr):
-    out = np.zeros(len(arr) * 2 + 1024, dtype=np.uint32)
-    n = svb_codec.encodeArray(arr, len(arr), out, len(out))
-    return out[:n].tobytes()
-
-
 svb_noremap_sizes = []
 for c in chunks:
     ids_u32 = c.astype(np.uint32)
@@ -88,12 +80,7 @@ for c in chunks:
 svb_noremap_ratio = np.median(raw_byte_lens / np.array(svb_noremap_sizes))
 
 # ── streamvbyte WITH rank-remap (+freq, for reference: already known 2.62x) ──
-counts = np.zeros(VOCAB, dtype=np.int64)
-vals, cnts = np.unique(train_r50k_ids, return_counts=True)
-counts[vals] = cnts
-order = np.argsort(-counts)
-rank_of = np.empty(VOCAB, dtype=np.uint32)
-rank_of[order] = np.arange(VOCAB, dtype=np.uint32)
+rank_of, _ = build_rank_table(train_r50k_ids, VOCAB)
 svb_remap_sizes = []
 for c in chunks:
     remapped = rank_of[c.astype(np.int64)]

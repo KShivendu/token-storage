@@ -36,25 +36,23 @@ os.environ.setdefault("TIKTOKEN_MAX_THREADS", "1")
 
 import sys
 import json
-import time
 import lzma
 import numpy as np
 import tiktoken
 import zstandard as zstd
 import constriction
 
-# reuse the validated LEB128 / streamvbyte / LZMA helpers from 07_kalcher_baseline
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "07_kalcher_baseline"))
-from bench_kalcher import (  # noqa: E402
-    leb128_encode, leb128_decode, svb_encode_arr, svb_decode_arr, LZMA_FILTERS,
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tnbench import (  # noqa: E402
+    load_ids, make_chunks, bootstrap_ci, timed_reps, seeded_rng,
+    leb128_encode, leb128_decode, svb_encode_arr, svb_decode_arr,
+    build_rank_table, build_ans_model, zstd_c22, zstd_d, LZMA_FILTERS,
 )
 
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
 CHUNK_SIZE = 512
 N_CHUNKS = 40
 REPS = 30
 SEED = 9012                       # match Table 1 path B
-N_BOOTSTRAP = 2000
 TOKENIZERS = {"r50k": ("r50k_base", 50257),
               "cl100k": ("cl100k_base", 100277),
               "o200k": ("o200k_base", 200019)}
@@ -64,53 +62,18 @@ MAX_TRAIN_SAMPLES = 15000         # pooled train chunks used to train the dict
 DOMAIN_PLAN = {"code": DICT_SIZES, "prose": [112 * 1024], "hindi": [112 * 1024]}
 
 r50k = tiktoken.get_encoding("r50k_base")
-zstd_c22 = zstd.ZstdCompressor(level=22)
-zstd_d = zstd.ZstdDecompressor()
-
-
-def bootstrap_ci(values, rng, n_boot=N_BOOTSTRAP, alpha=0.10):
-    values = np.asarray(values, dtype=np.float64)
-    if len(values) < 2:
-        return float(np.median(values)), (float(values[0]), float(values[0]))
-    idx = rng.integers(0, len(values), size=(n_boot, len(values)))
-    bm = np.median(values[idx], axis=1)
-    lo, hi = np.percentile(bm, [100 * alpha / 2, 100 * (1 - alpha / 2)])
-    return float(np.median(values)), (float(lo), float(hi))
-
-
-def make_chunks(arr, chunk_size, n_chunks, rng):
-    max_chunks = len(arr) // chunk_size
-    n = min(n_chunks, max_chunks)
-    starts = rng.choice(max_chunks, size=n, replace=False) * chunk_size
-    return [arr[s: s + chunk_size] for s in starts]
-
-
-def timed_reps(fn, reps=REPS):
-    ts = []
-    for _ in range(reps):
-        t0 = time.perf_counter()
-        fn()
-        t1 = time.perf_counter()
-        ts.append((t1 - t0) * 1e6)
-    return float(np.median(ts))
 
 
 def run_domain(domain, tok, enc, vocab, rng):
     print(f"\n########## {domain} ({tok}) ##########", flush=True)
-    train = np.load(os.path.join(CORPUS_DIR, f"{domain}_train.npy")).astype(np.int64)
-    test = np.load(os.path.join(CORPUS_DIR, f"{domain}_test.npy")).astype(np.int64)
+    train = load_ids(f"{domain}_train")
+    test = load_ids(f"{domain}_test")
     train_text = r50k.decode(train.tolist())
 
     # full-train rank table (freq remap) + ANS model, in this tokenizer
     train_ids = np.array(enc.encode(train_text, disallowed_special=()), dtype=np.int64)
-    fcounts = np.bincount(train_ids, minlength=vocab)
-    order = np.argsort(-fcounts)
-    rank_of = np.empty(vocab, dtype=np.uint32)
-    rank_of[order] = np.arange(vocab, dtype=np.uint32)
-    token_of_rank = order.astype(np.int64)
-    ans_counts = np.ones(vocab, dtype=np.int64) + fcounts
-    ans_probs = ans_counts.astype(np.float64) / ans_counts.sum()
-    ans_model = constriction.stream.model.Categorical(ans_probs, perfect=False)
+    rank_of, token_of_rank = build_rank_table(train_ids, vocab)
+    ans_model = build_ans_model(train_ids, vocab)
 
     # ---- corpus-wide training samples: every 512-r50k-window of TRAIN, as
     #      freq-remapped LEB128 varint bytes (same object as a test payload) ----
@@ -238,7 +201,7 @@ def main():
         enc = tiktoken.get_encoding(enc_name)
         results["grid"][tok] = {}
         for di, domain in enumerate(["code", "prose", "hindi"]):
-            rng = np.random.default_rng([SEED, ti, di])
+            rng = seeded_rng(SEED, ti, di)
             results["grid"][tok][domain] = run_domain(domain, tok, enc, vocab, rng)
 
     # ── summary grid: zstd --train on token IDs (112K dict) per tokenizer x domain ──

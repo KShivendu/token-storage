@@ -21,40 +21,21 @@ then bootstrap over 40 chunks -- same robust methodology as
 03_latency/bench_agent_mode_v2.py.
 """
 import os
+import sys
 import json
 import lzma
 import numpy as np
 import tiktoken
 import lz4.frame as lz4f
-import zstandard as zstd
 import constriction
 
-import time
-
-from bench_kalcher import (
-    leb128_encode,
-    leb128_decode,
-    svb_encode_arr,
-    svb_decode_arr,
-    zstd_c22,
-    zstd_d,
-    LZMA_FILTERS,
-    timed_reps,
-    bootstrap_ci,
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tnbench import (
+    load_ids, make_chunks, bootstrap_ci, timed_reps, timed_once,
+    leb128_encode, leb128_decode, svb_encode_arr, svb_decode_arr,
+    build_rank_table, build_ans_model, zstd_c22, zstd_d, LZMA_FILTERS,
 )
 
-
-def timed_once(fn):
-    """Single perf_counter shot, microseconds. Used ONLY for tokenize/detokenize
-    (100s of us, not noise-sensitive at this scale) -- matches how
-    bench_agent_mode_v2.py measures tokenize_only, so LZ4's mandatory
-    tokenize/detokenize cost isn't understated by warm-cache 30-rep timing."""
-    t0 = time.perf_counter()
-    fn()
-    t1 = time.perf_counter()
-    return (t1 - t0) * 1e6
-
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
 CHUNK_SIZE = 512
 N_CHUNKS = 40
 VOCAB = 50257
@@ -64,27 +45,13 @@ SEED = 3344
 r50k = tiktoken.get_encoding("r50k_base")
 
 
-def make_chunks(test_arr, chunk_size, n_chunks, rng):
-    max_chunks = len(test_arr) // chunk_size
-    n = min(n_chunks, max_chunks)
-    starts = rng.choice(max_chunks, size=n, replace=False) * chunk_size
-    return [test_arr[s : s + chunk_size] for s in starts]
-
-
 def main():
     rng = np.random.default_rng(SEED)
-    train = np.load(os.path.join(CORPUS_DIR, "prose_train.npy")).astype(np.int64)
-    test = np.load(os.path.join(CORPUS_DIR, "prose_test.npy")).astype(np.int64)
+    train = load_ids("prose_train")
+    test = load_ids("prose_test")
 
-    counts = np.bincount(train, minlength=VOCAB)
-    order = np.argsort(-counts)
-    rank_of = np.empty(VOCAB, dtype=np.uint32)
-    rank_of[order] = np.arange(VOCAB, dtype=np.uint32)
-    token_of_rank = order.astype(np.int64)
-
-    ans_counts = np.ones(VOCAB, dtype=np.int64) + np.bincount(train[:ANS_TRAIN_TOKENS], minlength=VOCAB)
-    ans_probs = ans_counts.astype(np.float64) / ans_counts.sum()
-    ans_model = constriction.stream.model.Categorical(ans_probs, perfect=False)
+    rank_of, token_of_rank = build_rank_table(train, VOCAB)
+    ans_model = build_ans_model(train[:ANS_TRAIN_TOKENS], VOCAB)
 
     chunks = make_chunks(test, CHUNK_SIZE, N_CHUNKS, rng)
     texts = [r50k.decode(c.tolist()) for c in chunks]

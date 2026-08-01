@@ -9,7 +9,7 @@ methodology as the other fixed benchmarks this session), then min/median/p99
 are taken across the 40 chunks.
 """
 import os
-import time
+import sys
 import numpy as np
 import tiktoken
 import lz4.frame as lz4f
@@ -18,7 +18,9 @@ import zstandard as zstd
 import brotli
 import constriction
 
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tnbench import make_chunks as _make_chunks, timed_reps, pack3, unpack3, build_ans_model, load_ids
+
 CHUNK_SIZE = 512
 N_CHUNKS = 40
 REPS = 30
@@ -27,26 +29,13 @@ RNG = np.random.default_rng(3344)
 r50k = tiktoken.get_encoding("r50k_base")
 TOKENIZERS = {"r50k": ("r50k_base", 50257), "cl100k": ("cl100k_base", 100277), "o200k": ("o200k_base", 200019)}
 
-train_ids = np.load(os.path.join(CORPUS_DIR, "prose_train.npy")).astype(np.int64)
-test_ids = np.load(os.path.join(CORPUS_DIR, "prose_test.npy")).astype(np.int64)
+train_ids = load_ids("prose_train")
+test_ids = load_ids("prose_test")
 train_text = r50k.decode(train_ids[: 400 * CHUNK_SIZE].tolist())
 
 
 def make_chunks(test_arr, chunk_size, n_chunks):
-    max_chunks = len(test_arr) // chunk_size
-    n = min(n_chunks, max_chunks)
-    starts = RNG.choice(max_chunks, size=n, replace=False) * chunk_size
-    return [test_arr[s: s + chunk_size] for s in starts]
-
-
-def timed_reps(fn, reps=REPS):
-    ts = []
-    for _ in range(reps):
-        t0 = time.perf_counter()
-        fn()
-        t1 = time.perf_counter()
-        ts.append((t1 - t0) * 1e6)
-    return float(np.median(ts))
+    return _make_chunks(test_arr, chunk_size, n_chunks, RNG)
 
 
 chunks = make_chunks(test_ids, CHUNK_SIZE, N_CHUNKS)
@@ -96,28 +85,11 @@ results["zstd --train"] = {"ratio": ratios, "enc": encs, "dec": decs}
 print("zstd --train done", flush=True)
 
 # ── per-tokenizer: raw packing + static ANS ─────────────────────────────────
-def pack3(ids):
-    n = len(ids)
-    out = np.zeros(n * 3, dtype=np.uint8)
-    out[0::3] = (ids >> 16) & 0xFF
-    out[1::3] = (ids >> 8) & 0xFF
-    out[2::3] = ids & 0xFF
-    return out.tobytes()
-
-
-def unpack3(buf, n):
-    arr = np.frombuffer(buf, dtype=np.uint8).reshape(n, 3).astype(np.int64)
-    return (arr[:, 0] << 16) | (arr[:, 1] << 8) | arr[:, 2]
-
-
 for tok_key, (enc_name, vocab_size) in TOKENIZERS.items():
     enc = tiktoken.get_encoding(enc_name)
     fits_uint16 = vocab_size <= 65536
     train_tok_ids = enc.encode(train_text, disallowed_special=())
-    counts = np.ones(vocab_size, dtype=np.int64)
-    counts += np.bincount(train_tok_ids, minlength=vocab_size)
-    probs = counts.astype(np.float64) / counts.sum()
-    model = constriction.stream.model.Categorical(probs, perfect=False)
+    model = build_ans_model(train_tok_ids, vocab_size)
 
     raw_ratios, raw_encs, raw_decs = [], [], []
     ans_ratios, ans_encs, ans_decs = [], [], []

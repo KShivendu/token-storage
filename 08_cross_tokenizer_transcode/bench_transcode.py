@@ -36,16 +36,16 @@ os.environ.setdefault("TIKTOKEN_MAX_THREADS", "1")
 
 import json
 import sys
-import time
 import regex
 import numpy as np
 import tiktoken
 
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tnbench import make_chunks, bootstrap_ci, load_ids, timed_reps as _timed_reps
+
 CHUNK_SIZE = 512
 N_CHUNKS = 40
 REPS = 25
-N_BOOTSTRAP = 2000
 SEED = 3344
 
 r50k = tiktoken.get_encoding("r50k_base")
@@ -54,31 +54,8 @@ ENC = {"r50k": r50k, "o200k": o200k}
 VOCAB = {"r50k": 50257, "o200k": 200019}
 
 
-def bootstrap_ci(values, rng, n_boot=N_BOOTSTRAP, alpha=0.10):
-    values = np.asarray(values, dtype=np.float64)
-    if len(values) < 2:
-        return float(np.median(values)), (float(values[0]), float(values[0]))
-    idx = rng.integers(0, len(values), size=(n_boot, len(values)))
-    boot_medians = np.median(values[idx], axis=1)
-    lo, hi = np.percentile(boot_medians, [100 * alpha / 2, 100 * (1 - alpha / 2)])
-    return float(np.median(values)), (float(lo), float(hi))
-
-
-def make_chunks(test_arr, chunk_size, n_chunks, rng):
-    max_chunks = len(test_arr) // chunk_size
-    n = min(n_chunks, max_chunks)
-    starts = rng.choice(max_chunks, size=n, replace=False) * chunk_size
-    return [test_arr[s : s + chunk_size] for s in starts]
-
-
-def timed_reps(fn, reps=REPS):
-    ts = []
-    for _ in range(reps):
-        t0 = time.perf_counter()
-        fn()
-        t1 = time.perf_counter()
-        ts.append((t1 - t0) * 1e6)
-    return float(np.median(ts))
+def timed_reps(fn, reps=REPS):  # this bench times median-of-25 (not 30)
+    return _timed_reps(fn, reps)
 
 
 # ── per-token LUT (Strategy A) ───────────────────────────────────────────────
@@ -257,8 +234,8 @@ def run_direction(src_key, tgt_key, chunks_r50k, texts, train_text, rng):
 
 def main():
     rng = np.random.default_rng(SEED)
-    test = np.load(os.path.join(CORPUS_DIR, "prose_test.npy")).astype(np.int64)
-    train = np.load(os.path.join(CORPUS_DIR, "prose_train.npy")).astype(np.int64)
+    test = load_ids("prose_test")
+    train = load_ids("prose_train")
     train_text = r50k.decode(train.tolist())  # full English train text
     chunks_r50k = make_chunks(test, CHUNK_SIZE, N_CHUNKS, rng)
     texts = [r50k.decode(c.tolist()) for c in chunks_r50k]

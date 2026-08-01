@@ -29,45 +29,22 @@ import os
 os.environ.setdefault("RAYON_NUM_THREADS", "1")
 os.environ.setdefault("TIKTOKEN_MAX_THREADS", "1")
 
+import sys
 import json
 import time
 import numpy as np
 import tiktoken
 
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tnbench import make_chunks, bootstrap_ci, timed_once, timed_reps, load_ids
+
 CHUNK_SIZE = 512
 N_CHUNKS = 100          # distinct cold chunks, more than the 40 baseline to smooth single-shot noise
 WARM_REPS = 30
-N_BOOTSTRAP = 2000
 SEED = 3344
 TOKENIZERS = {"r50k": "r50k_base", "cl100k": "cl100k_base", "o200k": "o200k_base"}
 
 r50k = tiktoken.get_encoding("r50k_base")
-
-
-def bootstrap_ci(values, rng, n_boot=N_BOOTSTRAP, alpha=0.10):
-    values = np.asarray(values, dtype=np.float64)
-    if len(values) < 2:
-        return float(np.median(values)), (float(values[0]), float(values[0]))
-    idx = rng.integers(0, len(values), size=(n_boot, len(values)))
-    boot_medians = np.median(values[idx], axis=1)
-    lo, hi = np.percentile(boot_medians, [100 * alpha / 2, 100 * (1 - alpha / 2)])
-    return float(np.median(values)), (float(lo), float(hi))
-
-
-def make_chunks(test_arr, chunk_size, n_chunks, rng):
-    max_chunks = len(test_arr) // chunk_size
-    n = min(n_chunks, max_chunks)
-    starts = rng.choice(max_chunks, size=n, replace=False) * chunk_size
-    return [test_arr[s : s + chunk_size] for s in starts]
-
-
-def timed_once(fn):
-    """Single perf_counter shot, us -- identical to bench_unified_latency.py."""
-    t0 = time.perf_counter()
-    fn()
-    t1 = time.perf_counter()
-    return (t1 - t0) * 1e6
 
 
 # 64 MB sweep to evict the tokenizer's multi-MB ranks table from CPU cache
@@ -91,19 +68,9 @@ def timed_once_serving(fn):
     return (t1 - t0) * 1e6
 
 
-def timed_reps(fn, reps=WARM_REPS):
-    ts = []
-    for _ in range(reps):
-        t0 = time.perf_counter()
-        fn()
-        t1 = time.perf_counter()
-        ts.append((t1 - t0) * 1e6)
-    return float(np.median(ts))
-
-
 def main():
     rng = np.random.default_rng(SEED)
-    test = np.load(os.path.join(CORPUS_DIR, "prose_test.npy")).astype(np.int64)
+    test = load_ids("prose_test")
 
     # Reference r50k 512-token chunks -> canonical English text pieces. To keep
     # "512 tokens in each tokenizer's own encoding", we re-slice each tokenizer's

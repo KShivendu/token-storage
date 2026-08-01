@@ -8,7 +8,6 @@ used in the first pass), plus 2000 kept as a reference point.
 Static ANS tables are trained per (domain, tokenizer) on that domain's
 TRAIN split (never touching the TEST chunks measured here).
 """
-import gzip
 import json
 import os
 import sys
@@ -20,7 +19,10 @@ import tiktoken
 import zstandard as zstd
 import constriction
 
-CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "corpus")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import tnbench as T
+from tnbench import build_ans_model, load_ids
+
 DOMAINS = ["prose", "code", "hindi"]
 CHUNK_SIZES = [256, 512, 2000]
 N_CHUNKS = 40
@@ -36,7 +38,6 @@ LZ4_BLOCK_BYTES = 16 * 1024
 LZ4_BLOCK_MAX_DOCS = 128
 LZ4_BLOCK_N_DOCS = 300  # sampled per domain per chunk_size, before grouping into blocks
 TOKENIZERS = {"r50k": ("r50k_base", 50257, 2), "cl100k": ("cl100k_base", 100277, 3), "o200k": ("o200k_base", 200019, 3)}
-N_BOOTSTRAP = 2000
 RNG = np.random.default_rng(9012)
 
 zstd_c = zstd.ZstdCompressor(level=19)
@@ -44,21 +45,12 @@ r50k = tiktoken.get_encoding("r50k_base")
 TOKENIZER_ENCODERS = {k: tiktoken.get_encoding(v[0]) for k, v in TOKENIZERS.items()}
 
 
-def bootstrap_ci(values, n_boot=N_BOOTSTRAP, alpha=0.10):
-    values = np.asarray(values, dtype=np.float64)
-    if len(values) < 2:
-        return float(np.median(values)), (float(values[0]), float(values[0]))
-    idx = RNG.integers(0, len(values), size=(n_boot, len(values)))
-    boot_medians = np.median(values[idx], axis=1)
-    lo, hi = np.percentile(boot_medians, [100 * alpha / 2, 100 * (1 - alpha / 2)])
-    return float(np.median(values)), (float(lo), float(hi))
+def bootstrap_ci(values):
+    return T.bootstrap_ci(values, RNG)
 
 
 def make_chunks(test_arr, chunk_size, n_chunks):
-    max_chunks = len(test_arr) // chunk_size
-    n = min(n_chunks, max_chunks)
-    starts = RNG.choice(max_chunks, size=n, replace=False) * chunk_size
-    return [test_arr[s : s + chunk_size] for s in starts]
+    return T.make_chunks(test_arr, chunk_size, n_chunks, RNG)
 
 
 def run_lz4_blocks_for_chunk_size(chunk_size):
@@ -81,7 +73,7 @@ def run_lz4_blocks_for_chunk_size(chunk_size):
     simulation produces (here, only the trailing block can be dirty)."""
     results = {}
     for domain in DOMAINS:
-        test_r50k = np.load(os.path.join(CORPUS_DIR, f"{domain}_test.npy")).astype(np.int64)
+        test_r50k = load_ids(f"{domain}_test")
         sampled = make_chunks(test_r50k, chunk_size, LZ4_BLOCK_N_DOCS)
         # sort by corpus position so blocks group corpus-adjacent documents,
         # mirroring how a real index batches sequentially-ingested docs
@@ -142,7 +134,7 @@ def run_zstd_dict_for_chunk_size(chunk_size):
     trainer wants many samples, not one giant blob."""
     results = {}
     for domain in DOMAINS:
-        train_r50k = np.load(os.path.join(CORPUS_DIR, f"{domain}_train.npy")).astype(np.int64)
+        train_r50k = load_ids(f"{domain}_train")
 
         train_samples_ids = make_chunks(train_r50k, ZSTD_DICT_TRAIN_CHUNK, 400)
         samples = [r50k.decode(c.tolist()).encode("utf-8") for c in train_samples_ids]
@@ -151,7 +143,7 @@ def run_zstd_dict_for_chunk_size(chunk_size):
         dict_c = zstd.ZstdCompressor(level=19, dict_data=zdict)
         dict_d = zstd.ZstdDecompressor(dict_data=zdict)
 
-        test_r50k = np.load(os.path.join(CORPUS_DIR, f"{domain}_test.npy")).astype(np.int64)
+        test_r50k = load_ids(f"{domain}_test")
         chunks = make_chunks(test_r50k, chunk_size, N_CHUNKS)
         texts = [r50k.decode(c.tolist()) for c in chunks]
         raw_byte_lists = [t.encode("utf-8") for t in texts]
@@ -293,7 +285,7 @@ def run_for_chunk_size(chunk_size):
 
     for domain in DOMAINS:
         print(f"=== {domain} (chunk_size={chunk_size}) ===")
-        test_r50k = np.load(os.path.join(CORPUS_DIR, f"{domain}_test.npy")).astype(np.int64)
+        test_r50k = load_ids(f"{domain}_test")
 
         chunks_r50k = make_chunks(test_r50k, chunk_size, N_CHUNKS)
         texts = [r50k.decode(c.tolist()) for c in chunks_r50k]
@@ -331,7 +323,7 @@ def run_for_chunk_size(chunk_size):
 
         # ── per-tokenizer: raw packing + static ANS ─────────────────────────
         if domain not in train_text_cache:
-            train_r50k = np.load(os.path.join(CORPUS_DIR, f"{domain}_train.npy")).astype(np.int64)
+            train_r50k = load_ids(f"{domain}_train")
             train_text_cache[domain] = r50k.decode(train_r50k.tolist())
         train_text = train_text_cache[domain]
 
@@ -359,12 +351,7 @@ def run_for_chunk_size(chunk_size):
             cache_key = (domain, tok_key)
             if cache_key not in run_for_chunk_size.model_cache:
                 train_ids = enc.encode(train_text, disallowed_special=())
-                counts = np.ones(vocab_size, dtype=np.int64)
-                counts += np.bincount(train_ids, minlength=vocab_size)
-                probs = counts.astype(np.float64) / counts.sum()
-                run_for_chunk_size.model_cache[cache_key] = constriction.stream.model.Categorical(
-                    probs, perfect=False
-                )
+                run_for_chunk_size.model_cache[cache_key] = build_ans_model(train_ids, vocab_size)
             model = run_for_chunk_size.model_cache[cache_key]
 
             ans_ratios, ans_enc_t, ans_dec_t = [], [], []

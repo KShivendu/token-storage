@@ -8,7 +8,6 @@ for fast batch encoding — same backend, skips Python wrapper overhead.
 import os, json
 import numpy as np
 import constriction
-from collections import Counter
 from datasets import load_dataset
 from tokenizers import Tokenizer
 

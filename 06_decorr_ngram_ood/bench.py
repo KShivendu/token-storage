@@ -18,14 +18,13 @@ import os, sys, json
 import numpy as np
 import tiktoken
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from tnbench import load_ids as load
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-CORPUS = os.path.join(HERE, "..", "data", "corpus")
 DOMAINS = ["prose", "code", "hindi"]
 V = 50257
 enc = tiktoken.get_encoding("r50k_base")
-
-def load(name):
-    return np.load(os.path.join(CORPUS, f"{name}.npy")).astype(np.int64)
 
 def to_bytes(ids, cap=None):
     if cap: ids = ids[:cap]
