@@ -1,0 +1,204 @@
+{
+  "config": {
+    "corpus": "prose (English C4)",
+    "chunk_size_tokens": 512,
+    "n_chunks": 100,
+    "warm_reps": 30,
+    "seed": 3344,
+    "single_core": true,
+    "cold_method": "timed_once single perf_counter shot per distinct chunk (text cold, one reused Encoding object warm) -- matches bench_unified_latency.py",
+    "warm_method": "timed_reps median-of-30 per chunk (warm cache)",
+    "chunk_convention": "512 IDs in each tokenizer's OWN encoding; also normalized per 1k UTF-8 bytes"
+  },
+  "tokenizers": {
+    "r50k": {
+      "cold_tokenize_us_per_chunk_512tok": [
+        116.06850057432894,
+        [
+          115.03300265758298,
+          117.0069990621414
+        ]
+      ],
+      "warm_tokenize_us_per_chunk_512tok": [
+        106.17375119181816,
+        [
+          105.24525077926228,
+          106.58624978532316
+        ]
+      ],
+      "cold_over_warm_ratio_tokenize": 1.0931939323179276,
+      "cold_tokenize_us_per_1k_utf8_chars": [
+        49.61990024209558,
+        [
+          47.85823388380214,
+          51.45613394940922
+        ]
+      ],
+      "cold_detokenize_us_per_chunk_512tok": [
+        20.78099896607455,
+        [
+          20.420000510057434,
+          21.374002244556323
+        ]
+      ],
+      "warm_detokenize_us_per_chunk_512tok": [
+        7.635500878677703,
+        [
+          7.581500540254638,
+          7.678499969188124
+        ]
+      ],
+      "cold_over_warm_ratio_detokenize": 2.7216287832676342,
+      "cold_detokenize_us_per_1k_utf8_chars": [
+        8.970974374372187,
+        [
+          8.549001313343652,
+          9.317590619815856
+        ]
+      ],
+      "serving_cold_tokenize_us_per_chunk_512tok": [
+        207.87250105058774,
+        [
+          199.55000243498944,
+          215.49150005739648
+        ]
+      ],
+      "serving_cold_detokenize_us_per_chunk_512tok": [
+        42.23999712849036,
+        [
+          41.38999793212861,
+          43.47585108916974
+        ]
+      ],
+      "median_utf8_bytes_per_chunk": 2344.5,
+      "median_codepoints_per_chunk": 2335.5,
+      "n_chunks": 100
+    },
+    "cl100k": {
+      "cold_tokenize_us_per_chunk_512tok": [
+        131.39250222593546,
+        [
+          130.67049803794362,
+          132.2330748735112
+        ]
+      ],
+      "warm_tokenize_us_per_chunk_512tok": [
+        123.92799908411689,
+        [
+          123.21000031079166,
+          124.99249896791298
+        ]
+      ],
+      "cold_over_warm_ratio_tokenize": 1.0602325801835306,
+      "cold_tokenize_us_per_1k_utf8_chars": [
+        54.33639371785219,
+        [
+          52.89629330538071,
+          55.49534073419792
+        ]
+      ],
+      "cold_detokenize_us_per_chunk_512tok": [
+        30.465998861473054,
+        [
+          29.559500035247765,
+          31.1365001834929
+        ]
+      ],
+      "warm_detokenize_us_per_chunk_512tok": [
+        7.671250386920292,
+        [
+          7.602248842886183,
+          7.737500709481537
+        ]
+      ],
+      "cold_over_warm_ratio_detokenize": 3.971451500712124,
+      "cold_detokenize_us_per_1k_utf8_chars": [
+        12.516650600169921,
+        [
+          12.197123491218157,
+          12.943448479502116
+        ]
+      ],
+      "serving_cold_tokenize_us_per_chunk_512tok": [
+        246.42750031489413,
+        [
+          241.1580026091542,
+          250.2374002688157
+        ]
+      ],
+      "serving_cold_detokenize_us_per_chunk_512tok": [
+        45.098498958395794,
+        [
+          43.16250124247745,
+          46.38899918063544
+        ]
+      ],
+      "median_utf8_bytes_per_chunk": 2406.0,
+      "median_codepoints_per_chunk": 2395.0,
+      "n_chunks": 100
+    },
+    "o200k": {
+      "cold_tokenize_us_per_chunk_512tok": [
+        121.91950008855201,
+        [
+          117.26100274245255,
+          123.97400132613257
+        ]
+      ],
+      "warm_tokenize_us_per_chunk_512tok": [
+        81.54024908435531,
+        [
+          80.82149997790111,
+          82.46600009442773
+        ]
+      ],
+      "cold_over_warm_ratio_tokenize": 1.495206373019825,
+      "cold_tokenize_us_per_1k_utf8_chars": [
+        50.686159159934,
+        [
+          48.28264997616777,
+          52.27189086384639
+        ]
+      ],
+      "cold_detokenize_us_per_chunk_512tok": [
+        20.78099896607455,
+        [
+          20.434124689927557,
+          21.092798942845548
+        ]
+      ],
+      "warm_detokenize_us_per_chunk_512tok": [
+        7.944750905153342,
+        [
+          7.867998647270724,
+          8.078749488049652
+        ]
+      ],
+      "cold_over_warm_ratio_detokenize": 2.6156891781962615,
+      "cold_detokenize_us_per_1k_utf8_chars": [
+        8.534862529910615,
+        [
+          8.31247212955504,
+          8.991721784492745
+        ]
+      ],
+      "serving_cold_tokenize_us_per_chunk_512tok": [
+        235.24350035586394,
+        [
+          228.68199812364765,
+          239.45550128701143
+        ]
+      ],
+      "serving_cold_detokenize_us_per_chunk_512tok": [
+        51.32699880050495,
+        [
+          50.16649993194733,
+          52.06500100030098
+        ]
+      ],
+      "median_utf8_bytes_per_chunk": 2437.5,
+      "median_codepoints_per_chunk": 2428.0,
+      "n_chunks": 100
+    }
+  }
+}
