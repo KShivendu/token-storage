@@ -225,3 +225,58 @@ three domains. Consequences:
   small RAG-style chunks (≤512) and only on skewed natural language; for longer
   documents a general compressor over frequency-ordered tokens wins on ratio —
   still at the read-latency cost quantified above (30–60µs vs `+freq`'s ~4µs).
+
+---
+
+## Matched Table 1 — Kalcher rows drop-in comparable to the paper's main table
+
+`bench_kalcher_table1_matched.py` is a **faithful copy of
+`01_storage_efficiency/bench_summary_tables.py`** (the script that produced the
+blog's 3-domain × 3-tokenizer ratio table) with Kalcher added *inline on the
+identical test chunks*. Kalcher draws no RNG during the aligned run and is
+bootstrapped only afterward, so every `raw`/`+ANS`/byte-codec row stays
+bit-identical to the blog. Config: seed 9012, 512-token chunks, full-train
+Laplace ANS, full-train rank table (matches `+freq`).
+
+### Anchor reproduction — ALL 9 +ANS cells reproduced exactly
+
+| tokenizer | prose | code | hindi |
+| --------- | ----: | ---: | ----: |
+| r50k +ANS   | 3.30× | 2.58× | 2.97× |
+| cl100k +ANS | 3.37× | **3.19×** | 3.48× |
+| o200k +ANS  | 3.40× | 3.16× | **5.90×** |
+
+Every value matches the published blog table to the cent (incl. the three
+anchors the coordinator named: r50k+ANS prose 3.30× — the English-only
+`bench_full_results_table.py` reports 3.26× for this because it trains ANS on
+only the first 400×512 tokens instead of the full split; the 3-domain table
+uses full-train, hence 3.30× — cl100k+ANS code 3.19×, o200k+ANS Hindi 5.90×).
+This proves the harness is the blog's, so the Kalcher rows below are directly
+comparable.
+
+### Kalcher rows (median [90% CI]), same chunks as the +ANS table
+
+| method               | prose | code  | hindi |
+| -------------------- | ----: | ----: | ----: |
+| r50k Kalcher(LZMA)   | 3.17× | 3.12× | 2.74× |
+| r50k Kalcher(zstd)   | 3.09× | 3.01× | 2.71× |
+| cl100k Kalcher(LZMA) | 3.24× | **3.46×** | 3.15× |
+| cl100k Kalcher(zstd) | 3.19× | 3.35× | 3.04× |
+| o200k Kalcher(LZMA)  | 3.26× | 3.44× | 4.93× |
+| o200k Kalcher(zstd)  | 3.22× | 3.35× | 4.80× |
+
+### Overall best method per language (max ratio across ALL methods)
+
+| language | best method            | ratio | runner-up                    |
+| -------- | ---------------------- | ----: | ---------------------------- |
+| English  | **o200k +ANS**         | 3.40× | cl100k +ANS (3.37×)          |
+| Code     | **cl100k Kalcher(LZMA)** | 3.46× | o200k Kalcher(LZMA) (3.44×) |
+| Hindi    | **o200k +ANS**         | 5.90× | o200k Kalcher(LZMA) (4.93×)  |
+
+Exactly the split the paper suspected: **English → token+ANS, code → Kalcher,
+Hindi → o200k+ANS.** So for Table 1, the true per-column winner to bold is a
+token+ANS on English and Hindi, but **Kalcher(LZMA) on code** (3.46× beats the
+best +ANS 3.19× by +0.27×, because LZ77 exploits code's token-stream repetition
+that an order-0 ANS model can't). On Hindi the +ANS win is decisive (5.90× vs
+4.93×). The ranking is at 512-token chunks; per the chunk-size sweep above,
+Kalcher's share of the wins only grows with document length.
