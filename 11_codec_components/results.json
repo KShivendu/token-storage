@@ -1,0 +1,173 @@
+{
+  "config": {
+    "corpus": "prose (English C4)",
+    "chunk_size": 512,
+    "n_chunks": 50,
+    "reps": 30,
+    "seed": 3344,
+    "single_core": true,
+    "codec_timing": "warm median-of-30 (matches bench_unified_latency.py codec halves)",
+    "tokenize_timing": "serving-cold single-shot, cache-evicted (matches 09_cold_tokenize)",
+    "compose": "byte write = detokenize + compress ; byte read = decompress + tokenize"
+  },
+  "serving_cold_tokenize_us": [
+    252.3340008337982,
+    [
+      247.78700026217848,
+      258.0324980954174
+    ]
+  ],
+  "serving_cold_detokenize_us": [
+    40.48250048072077,
+    [
+      39.313499655690975,
+      41.02899765712209
+    ]
+  ],
+  "codecs": {
+    "LZ4": {
+      "compress_us": [
+        4.952500603394583,
+        [
+          4.665999767894391,
+          5.075999069958925
+        ]
+      ],
+      "decompress_us": [
+        1.8110013115801848,
+        [
+          1.7530019249534234,
+          1.8535001800046302
+        ]
+      ],
+      "ratio": [
+        1.2784963616696987,
+        [
+          1.2591160220994475,
+          1.3028019141670808
+        ]
+      ],
+      "median_compressed_bytes": 1833.5,
+      "full_byte_write_us": 45.435001084115356,
+      "full_byte_read_us": 254.14500214537838
+    },
+    "gzip-9": {
+      "compress_us": [
+        36.96675139508443,
+        [
+          36.00416212066193,
+          39.25049986719387
+        ]
+      ],
+      "decompress_us": [
+        11.23999845731305,
+        [
+          10.754249160527252,
+          11.389500286895782
+        ]
+      ],
+      "ratio": [
+        1.9473967971032449,
+        [
+          1.9041892940263772,
+          1.9765217391304348
+        ]
+      ],
+      "median_compressed_bytes": 1196.0,
+      "full_byte_write_us": 77.4492518758052,
+      "full_byte_read_us": 263.57399929111125
+    },
+    "zstd-19": {
+      "compress_us": [
+        209.342249945621,
+        [
+          195.29849851096515,
+          218.83250065002358
+        ]
+      ],
+      "decompress_us": [
+        4.414248905959539,
+        [
+          4.292000085115433,
+          4.521000846580137
+        ]
+      ],
+      "ratio": [
+        1.9675533442883184,
+        [
+          1.9238351254480286,
+          1.9982744683205511
+        ]
+      ],
+      "median_compressed_bytes": 1184.5,
+      "full_byte_write_us": 249.82475042634178,
+      "full_byte_read_us": 256.74824973975774
+    },
+    "brotli-q11": {
+      "compress_us": [
+        2719.5789998586406,
+        [
+          2661.8938748015353,
+          2770.0199989340035
+        ]
+      ],
+      "decompress_us": [
+        9.086998943530489,
+        [
+          8.887750482244883,
+          9.31350041355472
+        ]
+      ],
+      "ratio": [
+        2.6243189049204587,
+        [
+          2.572898687929567,
+          2.697276716572018
+        ]
+      ],
+      "median_compressed_bytes": 900.5,
+      "full_byte_write_us": 2760.0615003393614,
+      "full_byte_read_us": 261.4209997773287
+    },
+    "zstd --train": {
+      "compress_us": [
+        375.4817498702323,
+        [
+          348.2534993963782,
+          392.0955005014548
+        ]
+      ],
+      "decompress_us": [
+        3.391499376448337,
+        [
+          3.261999154346995,
+          3.4835002225008793
+        ]
+      ],
+      "ratio": [
+        2.68477817326165,
+        [
+          2.5858930602957906,
+          2.7660550458715596
+        ]
+      ],
+      "median_compressed_bytes": 877.0,
+      "full_byte_write_us": 415.9642503509531,
+      "full_byte_read_us": 255.72550021024654
+    }
+  },
+  "token_native_reference": {
+    "r50k raw": {
+      "write": 0.6,
+      "read": 0.4
+    },
+    "r50k +freq": {
+      "write": 3.2,
+      "read": 4.0
+    },
+    "r50k +ANS": {
+      "write": 4.4,
+      "read": 28.6
+    }
+  }
+}
