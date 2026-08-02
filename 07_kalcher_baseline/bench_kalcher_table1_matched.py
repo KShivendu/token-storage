@@ -14,6 +14,7 @@ import lzma
 import os
 import sys
 import time
+import zlib
 import brotli
 import lz4.frame
 import numpy as np
@@ -776,7 +777,7 @@ def run_for_chunk_size(chunk_size):
             rank_of = run_for_chunk_size.rank_cache[cache_key]
 
             ans_ratios, ans_enc_t, ans_dec_t = [], [], []
-            klzma_ratios, kzstd_ratios = [], []  # Kalcher, no RNG (bootstrap later)
+            klzma_ratios, kzstd_ratios, kzlib_ratios = [], [], []  # Kalcher, no RNG (bootstrap later)
             freq_ratios = []  # +freq (streamvbyte), no RNG (bootstrap later)
             for raw, text, ids in zip(raw_byte_lists, texts, test_ids_list):
                 t0 = time.perf_counter()
@@ -806,6 +807,7 @@ def run_for_chunk_size(chunk_size):
                 assert np.array_equal(leb128_decode(varint), remapped)
                 klzma_ratios.append(len(raw) / len(lzma.compress(varint, format=lzma.FORMAT_RAW, filters=LZMA_FILTERS)))
                 kzstd_ratios.append(len(raw) / len(zstd_c22.compress(varint)))
+                kzlib_ratios.append(len(raw) / len(zlib.compress(varint, 9)))  # zlib level 9, no RNG
             ratio_results[(domain, f"{tok_key} +ANS")] = bootstrap_ci(ans_ratios)
             latency_results[(domain, f"{tok_key} +ANS")] = {
                 "encode": bootstrap_ci(np.array(ans_enc_t) * 1e6),
@@ -813,6 +815,7 @@ def run_for_chunk_size(chunk_size):
             }
             run_for_chunk_size.kalcher_raw[(chunk_size, domain, f"{tok_key} Kalcher(LZMA)")] = klzma_ratios
             run_for_chunk_size.kalcher_raw[(chunk_size, domain, f"{tok_key} Kalcher(zstd)")] = kzstd_ratios
+            run_for_chunk_size.kalcher_raw[(chunk_size, domain, f"{tok_key} Kalcher(zlib)")] = kzlib_ratios
             run_for_chunk_size.freq_raw[(chunk_size, domain, f"{tok_key} +freq")] = freq_ratios
 
             # ---- +lz4: LZ4-frame over the SAME packed token-ID bytes as `raw`
@@ -1008,6 +1011,26 @@ for (cs2, d, mm), v in run_for_chunk_size.lz4_raw.items():
     if cs2 == CS:
         lz4_ci[(d, mm)] = T.bootstrap_ci(v, lz4_boot_rng)
 
+# Kalcher(zlib) CIs also use an INDEPENDENT RNG (same reason as +lz4): this cell
+# was added after the aligned run, so bootstrapping it must not consume from the
+# global RNG and shift any pre-existing CI. Its table_median is an RNG-free
+# np.median. The r50k/cl100k/o200k Kalcher(LZMA) and Kalcher(zstd) cells are
+# already in kalcher_ci (global-RNG bootstrap above), so only zlib is added here.
+kzlib_boot_rng = np.random.default_rng([9012, 5])
+kalcher_zlib_ci = {}
+for tok in TOKS:
+    for d in DOMAINS:
+        kalcher_zlib_ci[(d, f"{tok} Kalcher(zlib)")] = T.bootstrap_ci(
+            run_for_chunk_size.kalcher_raw[(CS, d, f"{tok} Kalcher(zlib)")], kzlib_boot_rng
+        )
+
+# Table B row order (coordinator's method list). Full Kalcher grid: every
+# tokenizer {r50k, cl100k, o200k} x every downstream codec {LZMA, zstd, zlib}.
+KALCHER_GRID_ROWS = [
+    (f"{tok} Kalcher({codec})", (kalcher_zlib_ci if codec == "zlib" else kalcher_ci))
+    for tok in TOKS for codec in ["LZMA", "zstd", "zlib"]
+]
+
 # Table B row order (coordinator's method list)
 ROWS_B = [
     ("LZ4", lambda d: r512[(d, "LZ4")][0]),
@@ -1025,10 +1048,10 @@ ROWS_B = [
     ("r50k +lz4", lambda d: lz4_ci[(d, "r50k +lz4")][0]),
     ("cl100k +lz4", lambda d: lz4_ci[(d, "cl100k +lz4")][0]),
     ("o200k +lz4", lambda d: lz4_ci[(d, "o200k +lz4")][0]),
-    ("cl100k Kalcher(LZMA)", lambda d: kalcher_ci[(d, "cl100k Kalcher(LZMA)")][0]),
-    ("cl100k Kalcher(zstd)", lambda d: kalcher_ci[(d, "cl100k Kalcher(zstd)")][0]),
-    ("o200k Kalcher(LZMA)", lambda d: kalcher_ci[(d, "o200k Kalcher(LZMA)")][0]),
-    ("o200k Kalcher(zstd)", lambda d: kalcher_ci[(d, "o200k Kalcher(zstd)")][0]),
+] + [
+    # full Kalcher grid: {r50k, cl100k, o200k} x {LZMA, zstd, zlib}
+    (name, (lambda d, nm=name, src=src: src[(d, nm)][0]))
+    for name, src in KALCHER_GRID_ROWS
 ]
 
 print(f"\n{'=' * 78}\nPATH B -- COMPLETE Table 1, ONE full-train setup (512-tok), median\n{'=' * 78}")
@@ -1074,7 +1097,9 @@ existing["table1_full_train_consistent"] = {
     "config": {
         "harness": "same validated full-train harness (seed 9012); EVERY cell in one setup: "
                    "full-train Laplace ANS, full-train rank table (+freq), full-train zstd dict, "
-                   "Kalcher LEB128+{LZMA9e,zstd22}; identical 512-tok chunks",
+                   "Kalcher LEB128+{LZMA9e,zstd22,zlib9}; identical 512-tok chunks. Full Kalcher "
+                   "grid: {r50k,cl100k,o200k} x {LZMA,zstd,zlib}. Kalcher(zlib) bootstrap uses an "
+                   "independent RNG so it does not perturb any pre-existing global-RNG CI.",
         "chunk_size": CS, "n_chunks": N_CHUNKS, "seed": 9012,
     },
     "table_median": {name: tableB[name] for name, _ in ROWS_B},
@@ -1087,7 +1112,9 @@ existing["table1_full_train_consistent"] = {
         **{f"{d}|{tok} +lz4": lz4_ci[(d, f"{tok} +lz4")]
            for d in DOMAINS for tok in ["r50k", "cl100k", "o200k"]},
         **{f"{d}|{tok} {m}": kalcher_ci[(d, f"{tok} {m}")]
-           for d in DOMAINS for tok in ["cl100k", "o200k"] for m in ["Kalcher(LZMA)", "Kalcher(zstd)"]},
+           for d in DOMAINS for tok in ["r50k", "cl100k", "o200k"] for m in ["Kalcher(LZMA)", "Kalcher(zstd)"]},
+        **{f"{d}|{tok} Kalcher(zlib)": kalcher_zlib_ci[(d, f"{tok} Kalcher(zlib)")]
+           for d in DOMAINS for tok in ["r50k", "cl100k", "o200k"]},
     },
     "changed_vs_blog": [{"method": n, "domain": d, "blog": b, "full_train": g, "delta": round(dl, 3)}
                         for n, d, b, g, dl in changes],

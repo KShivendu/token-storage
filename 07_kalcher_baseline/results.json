@@ -1524,7 +1524,7 @@
   },
   "table1_full_train_consistent": {
     "config": {
-      "harness": "same validated full-train harness (seed 9012); EVERY cell in one setup: full-train Laplace ANS, full-train rank table (+freq), full-train zstd dict, Kalcher LEB128+{LZMA9e,zstd22}; identical 512-tok chunks",
+      "harness": "same validated full-train harness (seed 9012); EVERY cell in one setup: full-train Laplace ANS, full-train rank table (+freq), full-train zstd dict, Kalcher LEB128+{LZMA9e,zstd22,zlib9}; identical 512-tok chunks. Full Kalcher grid: {r50k,cl100k,o200k} x {LZMA,zstd,zlib}. Kalcher(zlib) bootstrap uses an independent RNG so it does not perturb any pre-existing global-RNG CI.",
       "chunk_size": 512,
       "n_chunks": 40,
       "seed": 9012
@@ -1605,6 +1605,21 @@
         "code": 2.02,
         "hindi": 2.57
       },
+      "r50k Kalcher(LZMA)": {
+        "prose": 3.17,
+        "code": 3.12,
+        "hindi": 2.74
+      },
+      "r50k Kalcher(zstd)": {
+        "prose": 3.09,
+        "code": 3.01,
+        "hindi": 2.71
+      },
+      "r50k Kalcher(zlib)": {
+        "prose": 3.09,
+        "code": 3.1,
+        "hindi": 2.96
+      },
       "cl100k Kalcher(LZMA)": {
         "prose": 3.24,
         "code": 3.46,
@@ -1615,6 +1630,11 @@
         "code": 3.35,
         "hindi": 3.04
       },
+      "cl100k Kalcher(zlib)": {
+        "prose": 3.17,
+        "code": 3.38,
+        "hindi": 3.25
+      },
       "o200k Kalcher(LZMA)": {
         "prose": 3.26,
         "code": 3.44,
@@ -1624,6 +1644,11 @@
         "prose": 3.22,
         "code": 3.35,
         "hindi": 4.8
+      },
+      "o200k Kalcher(zlib)": {
+        "prose": 3.2,
+        "code": 3.39,
+        "hindi": 4.82
       }
     },
     "full_ci": {
@@ -1963,6 +1988,20 @@
           2.6342559482774965
         ]
       ],
+      "prose|r50k Kalcher(LZMA)": [
+        3.1715502121640737,
+        [
+          3.0837696335078535,
+          3.2563153619656817
+        ]
+      ],
+      "prose|r50k Kalcher(zstd)": [
+        3.0918320917161086,
+        [
+          3.01673396649272,
+          3.19557945041816
+        ]
+      ],
       "prose|cl100k Kalcher(LZMA)": [
         3.241269443103561,
         [
@@ -1989,6 +2028,20 @@
         [
           3.067133884803922,
           3.2646901053665296
+        ]
+      ],
+      "code|r50k Kalcher(LZMA)": [
+        3.12183908045977,
+        [
+          2.965743847101934,
+          3.163101352059533
+        ]
+      ],
+      "code|r50k Kalcher(zstd)": [
+        3.0148398039954767,
+        [
+          2.8786575422781655,
+          3.0552921292927397
         ]
       ],
       "code|cl100k Kalcher(LZMA)": [
@@ -2019,6 +2072,20 @@
           3.489216469392201
         ]
       ],
+      "hindi|r50k Kalcher(LZMA)": [
+        2.738698801198801,
+        [
+          2.709455838400495,
+          2.7970261437908497
+        ]
+      ],
+      "hindi|r50k Kalcher(zstd)": [
+        2.7124948958758677,
+        [
+          2.681806229182493,
+          2.751070050639016
+        ]
+      ],
       "hindi|cl100k Kalcher(LZMA)": [
         3.1510579100614686,
         [
@@ -2045,6 +2112,69 @@
         [
           4.657102157102157,
           4.92997928566945
+        ]
+      ],
+      "prose|r50k Kalcher(zlib)": [
+        3.093494623655914,
+        [
+          2.9896936298525203,
+          3.1913990878946343
+        ]
+      ],
+      "prose|cl100k Kalcher(zlib)": [
+        3.1743782628999995,
+        [
+          3.0395209601890003,
+          3.2312078946510017
+        ]
+      ],
+      "prose|o200k Kalcher(zlib)": [
+        3.199546938702418,
+        [
+          3.0430959143543808,
+          3.253662825147507
+        ]
+      ],
+      "code|r50k Kalcher(zlib)": [
+        3.0966708023159635,
+        [
+          2.945155681997787,
+          3.1650485436893203
+        ]
+      ],
+      "code|cl100k Kalcher(zlib)": [
+        3.3762905604719764,
+        [
+          3.170619235836627,
+          3.5288909599254428
+        ]
+      ],
+      "code|o200k Kalcher(zlib)": [
+        3.3890872963770207,
+        [
+          3.180586109365179,
+          3.5665054123958235
+        ]
+      ],
+      "hindi|r50k Kalcher(zlib)": [
+        2.960932347530286,
+        [
+          2.904708832543884,
+          2.994891517815393
+        ]
+      ],
+      "hindi|cl100k Kalcher(zlib)": [
+        3.245352132144585,
+        [
+          3.190566037735849,
+          3.3069767441860467
+        ]
+      ],
+      "hindi|o200k Kalcher(zlib)": [
+        4.816324945635291,
+        [
+          4.743258175302374,
+          4.985778297292033
         ]
       ]
     },
