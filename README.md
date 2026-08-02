@@ -74,6 +74,36 @@ uv run python 00_corpus_prep/prep_multidomain.py  # builds data/corpus/, run onc
 
 Each numbered directory is runnable independently after that and maps to one section of the post.
 
+## CLI
+
+`bench.py` at the repo root is a thin config + dispatch layer over the existing
+benches (it imports and calls `run_cell` / `byte_codec_components` and the
+block/2x2 flags, and defines no measurement logic of its own). Tokenizer
+selection is always a list mapped per corpus, so a cross-corpus run can never
+fall back to a single hardcoded tokenizer.
+
+```bash
+# compression ratio (Table 1), all tokenizers x all corpora, 512-token chunks
+uv run python bench.py --experiment ratio
+
+# agent read/write latency (Table 2), pinned, r50k only, English only
+taskset -c 4 env RAYON_NUM_THREADS=1 TIKTOKEN_MAX_THREADS=1 \
+  uv run python bench.py --experiment latency --tokenizers r50k --corpora prose
+
+# ratio + latency across chunk sizes (defaults to 512 1024 2048 4096)
+taskset -c 4 uv run python bench.py --experiment chunk-sweep
+
+# byte/token x document/block 2x2 (ratio + single-document read latency)
+uv run python bench.py --experiment block2x2
+
+# pick a subset of methods, sizes, seed
+uv run python bench.py --experiment ratio --methods LZ4 zstd-19 +ANS +dict --chunk-sizes 512 2048
+```
+
+Knobs: `--experiment {ratio,latency,block2x2,chunk-sweep}`, `--tokenizers`,
+`--corpora`, `--chunk-sizes`, `--methods`, `--seed`, `--n-chunks`, `--out`. The
+script prints its resolved config before running. See `--help` for details.
+
 ## License
 
 MIT. Cite the blog post if you use these numbers elsewhere.
