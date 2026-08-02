@@ -259,6 +259,102 @@ def run_cell(domain, tok, enc, vocab, is_r50k, rng):
     }, texts, train
 
 
+def chunk_sweep():
+    """Chunk-size scaling appendix: reuse run_cell + byte_codec_components across
+    chunk sizes for the primary tokenizer (r50k), all three domains. Reports agent
+    READ and WRITE latency (paper definition) and ratio per method per size, plus a
+    per-1k-token normalized view. Reassigns the module-global CHUNK_SIZE, which every
+    helper reads, so no bench logic is duplicated."""
+    global CHUNK_SIZE
+    CHUNK_SIZES = [512, 1024, 2048, 4096]
+    TOK_SHOW = ["raw", "+freq", "+ANS", "+dict"]
+    BYTE_SHOW = ["LZ4", "zstd-19", "brotli-q11"]
+    enc = tiktoken.get_encoding("r50k_base")
+    vocab = 50257
+    sweep = {}
+    for cs in CHUNK_SIZES:
+        CHUNK_SIZE = cs
+        for di, domain in enumerate(DOMAINS):
+            print(f"########## cs={cs} / {domain} / r50k ##########", flush=True)
+            rng = seeded_rng(SEED, cs, di)
+            cell, texts, train = run_cell(domain, "r50k", enc, vocab, True, rng)
+            byte = byte_codec_components(texts, train, rng)
+            tok_cold = cell["tokenize_serving_cold_us"][0]
+            detok_cold = cell["detokenize_serving_cold_us"][0]
+            rec = {"tokenize_cold_us": tok_cold, "detokenize_cold_us": detok_cold, "methods": {}}
+            for m in TOK_SHOW:
+                mm = cell["methods"][m]
+                rec["methods"][m] = {"kind": "token", "read_us": mm["read_us"][0],
+                                     "write_us": mm["write_us"][0], "ratio": mm["ratio"][0]}
+            for name in BYTE_SHOW:
+                b = byte[name]
+                # agent read = decompress + tokenize (bytes -> IDs);
+                # agent write = compress + detokenize (IDs -> stored bytes)
+                rec["methods"][name] = {"kind": "byte",
+                                        "read_us": b["decompress_us"][0] + tok_cold,
+                                        "write_us": b["compress_us"][0] + detok_cold,
+                                        "compress_us": b["compress_us"][0],
+                                        "decompress_us": b["decompress_us"][0],
+                                        "ratio": b["ratio"][0]}
+            sweep[f"{cs}|{domain}"] = rec
+
+    ALLM = BYTE_SHOW + TOK_SHOW
+
+    def ptbl(title, field, norm=False):
+        print(f"\n{'=' * 96}\n  {title}\n{'=' * 96}")
+        unit = "us/1k-tok" if norm else "us"
+        print(f"  {'method':<12}{'kind':<6}" + "".join(f"{str(cs):>19}" for cs in CHUNK_SIZES))
+        for m in ALLM:
+            kind = sweep[f"512|prose"]["methods"][m]["kind"]
+            row = f"  {m:<12}{kind:<6}"
+            for cs in CHUNK_SIZES:
+                cells = []
+                for d in DOMAINS:
+                    v = sweep[f"{cs}|{d}"]["methods"][m][field]
+                    if norm:
+                        v = v / cs * 1000
+                    cells.append(v)
+                row += ("/".join(f"{c:.0f}" for c in cells)).rjust(19)
+            print(row)
+        print(f"  (cells are prose/code/hindi, {unit})")
+
+    print(f"\nRATIO and LATENCY vs chunk size (r50k, prose/code/hindi), seed {SEED}")
+    print(f"\n{'=' * 96}\n  RATIO vs chunk size (median x, vs raw UTF-8)\n{'=' * 96}")
+    print(f"  {'method':<12}{'kind':<6}" + "".join(f"{str(cs):>19}" for cs in CHUNK_SIZES))
+    for m in ALLM:
+        kind = sweep["512|prose"]["methods"][m]["kind"]
+        row = f"  {m:<12}{kind:<6}"
+        for cs in CHUNK_SIZES:
+            cells = [sweep[f"{cs}|{d}"]["methods"][m]["ratio"] for d in DOMAINS]
+            row += ("/".join(f"{c:.2f}" for c in cells)).rjust(19)
+        print(row)
+    print("  (cells are prose/code/hindi)")
+
+    ptbl("AGENT READ latency (bytes/IDs -> token IDs). byte read = decompress + tokenize(serving-cold)", "read_us")
+    ptbl("AGENT WRITE latency (token IDs -> stored). byte write = compress + detokenize(serving-cold)", "write_us")
+    ptbl("AGENT READ latency, per 1k tokens (linearity check)", "read_us", norm=True)
+    ptbl("AGENT WRITE latency, per 1k tokens (linearity check)", "write_us", norm=True)
+
+    print(f"\n  tokenize / detokenize serving-cold (us) by chunk size (prose/code/hindi):")
+    for cs in CHUNK_SIZES:
+        tks = "/".join(f"{sweep[f'{cs}|{d}']['tokenize_cold_us']:.0f}" for d in DOMAINS)
+        dtk = "/".join(f"{sweep[f'{cs}|{d}']['detokenize_cold_us']:.0f}" for d in DOMAINS)
+        print(f"    cs={cs:<5} tokenize={tks:<24} detokenize={dtk}")
+
+    out = {
+        "config": {"tokenizer": "r50k", "domains": DOMAINS, "chunk_sizes": CHUNK_SIZES,
+                   "n_chunks": N_CHUNKS, "seed": SEED, "token_methods": TOK_SHOW, "byte_codecs": BYTE_SHOW,
+                   "read": "agent read = to token IDs; byte = decompress + tokenize(serving-cold)",
+                   "write": "agent write = from token IDs; byte = compress + detokenize(serving-cold)",
+                   "timing": "codec ops warm median-of-30 (timed_reps); tokenize/detokenize serving-cold (timed_once_serving, 64MB sweep)"},
+        "sweep": sweep,
+    }
+    out_path = os.path.join(os.path.dirname(__file__), "latency_chunksize_sweep_results.json")
+    with open(out_path, "w") as f:
+        json.dump(out, f, indent=2)
+    print(f"\nSaved to {out_path}")
+
+
 def main():
     grid = {d: {} for d in DOMAINS}
     byte_ref = {}
@@ -321,4 +417,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if "--chunk-sweep" in sys.argv:
+        chunk_sweep()
+    else:
+        main()
