@@ -73,7 +73,7 @@ DICT_SIZE = 112 * 1024          # token-ID zstd --train dict
 DICT_TRAIN_SAMPLES = 8000       # bounded pool of train windows for the dict
 # dict-freqvarint (old freq-remap+LEB128+dict comparison) is appended LAST so its
 # bootstrap draws don't perturb the RNG order of the other methods.
-TOKEN_METHODS = ["raw", "+freq", "+ANS", "+dict", "Kalcher(zstd)", "Kalcher(LZMA)", "dict-freqvarint"]
+TOKEN_METHODS = ["raw", "+freq", "+ANS", "+dict", "+lz4", "Kalcher(zstd)", "Kalcher(LZMA)", "dict-freqvarint"]
 BYTE_CODECS = ["LZ4", "gzip-9", "zstd-19", "brotli-q11", "zstd --train"]
 
 r50k = tiktoken.get_encoding("r50k_base")
@@ -228,6 +228,17 @@ def run_cell(domain, tok, enc, vocab, is_r50k, rng):
         read["+dict"].append(timed_reps(lambda p=dictp, n=n: unpack_ids(zd_idb.decompress(p), n)))
         ratio["+dict"].append(raw_len / len(dictp))
 
+        # ---- +lz4: LZ4-frame applied DIRECTLY to the raw packed token-ID bytes
+        #      (uint16 / 3-byte). No dict, no freq-remap, no varint -- the token-
+        #      domain parallel of the byte-side LZ4 row. write = pack + lz4 compress
+        #      (model already emitted the IDs, so NO tokenize, exactly like raw/+dict);
+        #      read = lz4 decompress + unpack (NO detokenize). ----
+        lz4p = lz4f.compress(packed)
+        assert np.array_equal(unpack_ids(lz4f.decompress(lz4p), n), ids)
+        write["+lz4"].append(timed_reps(lambda i=ids: lz4f.compress(pack_ids(i))))
+        read["+lz4"].append(timed_reps(lambda p=lz4p, n=n: unpack_ids(lz4f.decompress(p), n)))
+        ratio["+lz4"].append(raw_len / len(lz4p))
+
         # ---- Kalcher(zstd-22, no dict) ----
         kzp = zstd_c22.compress(varint)
         write["Kalcher(zstd)"].append(timed_reps(lambda i=ids: zstd_c22.compress(leb128_encode(rank_of[i]))))
@@ -281,7 +292,7 @@ def chunk_sweep():
     the once-measured byte codec numbers line up with every tokenizer's token rows."""
     global CHUNK_SIZE
     CHUNK_SIZES = [512, 1024, 2048, 4096]
-    TOK_SHOW = ["raw", "+freq", "+ANS", "+dict"]
+    TOK_SHOW = ["raw", "+freq", "+ANS", "+dict", "+lz4"]
     # Draw byte codecs from the canonical module-level BYTE_CODECS (LZ4, gzip-9, zstd-19,
     # brotli-q11, zstd --train) so the sweep can never again silently drop zstd --train or
     # gzip-9 relative to Table 1. zstd --train / gzip-9 are byte codecs, so like the others
