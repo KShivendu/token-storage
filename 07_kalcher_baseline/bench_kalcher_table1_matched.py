@@ -26,6 +26,7 @@ import tnbench as T
 from tnbench import (
     load_ids, build_ans_model, build_rank_table,
     leb128_encode, leb128_decode, svb_encode_arr, zstd_c22, LZMA_FILTERS,
+    pack3, unpack3,
 )
 
 ZSTD_DICT_SIZE = 112 * 1024
@@ -147,6 +148,385 @@ def run_lz4_blocks_for_chunk_size(chunk_size):
             f"{results[domain]['median_docs_per_block']:.0f} docs/block"
         )
     return results
+
+
+# Block-level variants of the OTHER stronger byte codecs (zstd-19, brotli-q11),
+# built on the exact same ES/Lucene block-grouping as run_lz4_blocks. This is
+# the fairness stress test: give the strong byte codecs the cross-document
+# window a block store grants them, and see whether any of them overtakes the
+# per-chunk token-native numbers. Same read-amplification caveat as block LZ4:
+# reading one document forces decompressing its whole block.
+zstd_block_c = zstd.ZstdCompressor(level=19)
+zstd_block_d = zstd.ZstdDecompressor()
+BLOCK_CODECS = {
+    "LZ4": (lambda b: lz4.frame.compress(b), lambda b: lz4.frame.decompress(b)),
+    "zstd-19": (lambda b: zstd_block_c.compress(b), lambda b: zstd_block_d.decompress(b)),
+    "brotli-q11": (lambda b: brotli.compress(b, quality=11), lambda b: brotli.decompress(b)),
+}
+
+
+def run_codec_blocks_for_chunk_size(chunk_size, cfn, dfn):
+    """Generalized ES/Lucene-style block compression for ANY byte codec. Same
+    block grouping as run_lz4_blocks_for_chunk_size (<=16KB or 128 docs/block,
+    trailing partial block flushed), but the whole block is compressed with the
+    supplied (cfn, dfn) codec pair. Reports block ratio, amortized per-doc encode
+    cost, and single-doc decode cost (whole block decoded to read one doc)."""
+    results = {}
+    for domain in DOMAINS:
+        test_r50k = load_ids(f"{domain}_test")
+        sampled = make_chunks(test_r50k, chunk_size, LZ4_BLOCK_N_DOCS)
+        sampled = sorted(sampled, key=lambda c: c[0])
+        texts = [r50k.decode(c.tolist()) for c in sampled]
+        raw_byte_lists = [t.encode("utf-8") for t in texts]
+
+        blocks = []
+        cur, cur_bytes = [], 0
+        for raw in raw_byte_lists:
+            if cur and (cur_bytes + len(raw) > LZ4_BLOCK_BYTES or len(cur) >= LZ4_BLOCK_MAX_DOCS):
+                blocks.append(cur)
+                cur, cur_bytes = [], 0
+            cur.append(raw)
+            cur_bytes += len(raw)
+        n_dirty = 1 if (cur and cur_bytes < LZ4_BLOCK_BYTES and len(cur) < LZ4_BLOCK_MAX_DOCS) else 0
+        if cur:
+            blocks.append(cur)
+
+        ratios, enc_per_doc, dec_per_doc, docs_per_block = [], [], [], []
+        for block in blocks:
+            combined = b"".join(block)
+            t0 = time.perf_counter()
+            comp = cfn(combined)
+            t1 = time.perf_counter()
+            decomp = dfn(comp)
+            t2 = time.perf_counter()
+            assert decomp == combined
+            ratios.append(len(combined) / len(comp))
+            enc_per_doc.append((t1 - t0) / len(block))
+            dec_per_doc.append(t2 - t1)
+            docs_per_block.append(len(block))
+
+        results[domain] = {
+            "ratio": bootstrap_ci(ratios),
+            "encode_per_doc_us": bootstrap_ci(np.array(enc_per_doc) * 1e6),
+            "decode_per_doc_us": bootstrap_ci(np.array(dec_per_doc) * 1e6),
+            "n_blocks": len(blocks),
+            "n_dirty_blocks": n_dirty,
+            "median_docs_per_block": float(np.median(docs_per_block)) if docs_per_block else 0.0,
+        }
+    return results
+
+
+if "--codec-blocks" in sys.argv:
+    print("=== Block-level byte codecs (LZ4 / zstd-19 / brotli-q11), ES/Lucene blocks ===")
+    block_results = {name: {} for name in BLOCK_CODECS}
+    for name, (cfn, dfn) in BLOCK_CODECS.items():
+        for cs in CHUNK_SIZES:
+            block_results[name][cs] = run_codec_blocks_for_chunk_size(cs, cfn, dfn)
+
+    print(f"\n{'=' * 100}")
+    print("  BLOCK-LEVEL byte codecs (<=16KB or 128 docs/block, whole block compressed)")
+    print(f"{'=' * 100}")
+    print(f"  {'codec':<12} {'chunk':>6} {'domain':<7} {'block ratio':>18} {'enc us/doc':>16} {'dec us (1 doc)':>16} {'docs/blk':>9}")
+    for name in BLOCK_CODECS:
+        for cs in CHUNK_SIZES:
+            for d in DOMAINS:
+                r = block_results[name][cs][d]
+                rm, rc = r["ratio"]
+                em, ec = r["encode_per_doc_us"]
+                dm, dc = r["decode_per_doc_us"]
+                print(
+                    f"  {name:<12} {cs:>6} {d:<7}"
+                    f" {rm:.2f}x[{rc[0]:.2f},{rc[1]:.2f}]".rjust(19)
+                    + f" {em:.1f}[{ec[0]:.1f},{ec[1]:.1f}]".rjust(17)
+                    + f" {dm:.1f}[{dc[0]:.1f},{dc[1]:.1f}]".rjust(17)
+                    + f" {r['median_docs_per_block']:>9.0f}"
+                )
+
+    # Point-level ratios for the same codecs (read from the committed summary),
+    # so the delta point vs block is in one table. Recomputed here inline to keep
+    # this self-contained even if the summary json is absent.
+    print(f"\n{'=' * 100}")
+    print("  POINT vs BLOCK ratio (median), 512-tok chunks")
+    print(f"{'=' * 100}")
+    import gzip as _gzip  # noqa: F401  (kept for parity; point codecs recomputed below)
+    point_codecs = {
+        "LZ4": lambda b: lz4.frame.compress(b),
+        "zstd-19": lambda b: zstd_block_c.compress(b),
+        "brotli-q11": lambda b: brotli.compress(b, quality=11),
+    }
+    point_ratios = {name: {} for name in point_codecs}
+    for d in DOMAINS:
+        test_r50k = load_ids(f"{d}_test")
+        chunks = make_chunks(test_r50k, 512, N_CHUNKS)
+        raws = [r50k.decode(c.tolist()).encode("utf-8") for c in chunks]
+        for name, cfn in point_codecs.items():
+            rs = [len(raw) / len(cfn(raw)) for raw in raws]
+            point_ratios[name][d] = float(np.median(rs))
+    print(f"  {'codec':<12} {'domain':<7} {'point':>10} {'block':>10} {'block/point':>12}")
+    for name in point_codecs:
+        for d in DOMAINS:
+            p = point_ratios[name][d]
+            blk = block_results[name][512][d]["ratio"][0]
+            print(f"  {name:<12} {d:<7} {p:>9.2f}x {blk:>9.2f}x {blk / p:>11.2f}x")
+
+    out_path = os.path.join(os.path.dirname(__file__), "block_codecs_results.json")
+    out = {
+        "config": {
+            "block_bytes": LZ4_BLOCK_BYTES, "block_max_docs": LZ4_BLOCK_MAX_DOCS,
+            "n_docs_sampled": LZ4_BLOCK_N_DOCS, "seed": 9012,
+            "note": "ES/Lucene-style: docs batched into <=16KB or 128-doc blocks, "
+                    "whole block compressed. Reading one doc decompresses its whole block. "
+                    "zstd level 19, brotli quality 11, lz4.frame default.",
+        },
+        "block_ratio": {
+            f"{cs}|{d}|{name}": block_results[name][cs][d]["ratio"]
+            for name in BLOCK_CODECS for cs in CHUNK_SIZES for d in DOMAINS
+        },
+        "block_meta": {
+            f"{cs}|{d}|{name}": {
+                "n_blocks": block_results[name][cs][d]["n_blocks"],
+                "n_dirty_blocks": block_results[name][cs][d]["n_dirty_blocks"],
+                "median_docs_per_block": block_results[name][cs][d]["median_docs_per_block"],
+                "encode_per_doc_us": block_results[name][cs][d]["encode_per_doc_us"],
+                "decode_per_doc_us": block_results[name][cs][d]["decode_per_doc_us"],
+            }
+            for name in BLOCK_CODECS for cs in CHUNK_SIZES for d in DOMAINS
+        },
+        "point_ratio_512": {f"{d}|{name}": point_ratios[name][d] for name in point_codecs for d in DOMAINS},
+    }
+    with open(out_path, "w") as f:
+        json.dump(out, f, indent=2)
+    print(f"\nSaved point-vs-block deltas to block_codecs_results.json")
+    sys.exit(0)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Block-level TOKEN-NATIVE compression + the 2x2 single-document READ latency.
+# Shared helpers reused by both --token-blocks and --read-2x2. Uses each
+# corpus's script-appropriate tokenizer (English r50k, Code cl100k, Hindi
+# o200k), matching the paper's Figure. Blocks are grouped on the SAME
+# UTF-8-byte rule as the byte-codec blocks (<=16KB or 128 docs), so a block
+# holds the identical documents on both sides -- the only difference is
+# whether the block is stored as concatenated UTF-8 text or concatenated
+# token IDs.
+# ══════════════════════════════════════════════════════════════════════════
+CORPUS_TOK = {"prose": "r50k", "code": "cl100k", "hindi": "o200k"}
+
+
+def _group_blocks(raw_byte_lists):
+    """Same Lucene 16KB/128-doc grouping as the byte side, returning index lists."""
+    blocks, cur, cur_bytes = [], [], 0
+    for i, raw in enumerate(raw_byte_lists):
+        if cur and (cur_bytes + len(raw) > LZ4_BLOCK_BYTES or len(cur) >= LZ4_BLOCK_MAX_DOCS):
+            blocks.append(cur)
+            cur, cur_bytes = [], 0
+        cur.append(i)
+        cur_bytes += len(raw)
+    if cur:
+        blocks.append(cur)
+    return blocks
+
+
+def _pack_ids(ids, container_bytes):
+    ids = np.asarray(ids, dtype=np.int64)
+    return ids.astype("<u2").tobytes() if container_bytes == 2 else pack3(ids)
+
+
+def _unpack_ids(buf, n, container_bytes):
+    if container_bytes == 2:
+        return np.frombuffer(buf, dtype="<u2").astype(np.int64)
+    return unpack3(buf, n)
+
+
+def _token_setup(domain):
+    """Chosen tokenizer + full-train rank table (Kalcher) and ANS model for a domain."""
+    tok = CORPUS_TOK[domain]
+    _, vocab, cb = TOKENIZERS[tok]
+    enc = TOKENIZER_ENCODERS[tok]
+    train_text = r50k.decode(load_ids(f"{domain}_train").tolist())
+    train_ids = enc.encode(train_text, disallowed_special=())
+    rank_of, _ = build_rank_table(train_ids, vocab)
+    model = build_ans_model(train_ids, vocab)
+    return tok, enc, vocab, cb, rank_of, model
+
+
+def _sample_docs(domain, chunk_size, enc):
+    """Same sampling+ordering as run_codec_blocks: N docs, sorted by corpus
+    position so a block groups corpus-adjacent docs. Returns raw UTF-8 byte
+    lists and per-doc token-ID arrays (chosen tokenizer)."""
+    test_r50k = load_ids(f"{domain}_test")
+    sampled = sorted(make_chunks(test_r50k, chunk_size, LZ4_BLOCK_N_DOCS), key=lambda c: c[0])
+    texts = [r50k.decode(c.tolist()) for c in sampled]
+    raw_byte_lists = [t.encode("utf-8") for t in texts]
+    ids_list = [np.array(enc.encode(t, disallowed_special=()), dtype=np.int64) for t in texts]
+    return texts, raw_byte_lists, ids_list
+
+
+if "--token-blocks" in sys.argv:
+    print("=== Block-level TOKEN-NATIVE compression (same docs, same blocks, token space) ===")
+    zc19 = zstd.ZstdCompressor(level=19)
+    CS = 512
+    tb = {}  # (domain, method, grain) -> list of ratios
+    for domain in DOMAINS:
+        tok, enc, vocab, cb, rank_of, model = _token_setup(domain)
+        texts, raws, ids_list = _sample_docs(domain, CS, enc)
+        blocks = _group_blocks(raws)
+
+        # ---- per-document (point) token ratios ----
+        pt_zstd, pt_lzma, pt_ans = [], [], []
+        for raw, ids in zip(raws, ids_list):
+            pt_zstd.append(len(raw) / len(zc19.compress(_pack_ids(ids, cb))))
+            varint = leb128_encode(rank_of[ids])
+            pt_lzma.append(len(raw) / len(lzma.compress(varint, format=lzma.FORMAT_RAW, filters=LZMA_FILTERS)))
+            c = constriction.stream.stack.AnsCoder()
+            c.encode_reverse(ids.astype(np.int32), model)
+            pt_ans.append(len(raw) / len(c.get_compressed().tobytes()))
+
+        # ---- block token ratios (concatenate a block's IDs, compress whole) ----
+        bl_zstd, bl_lzma, bl_ans = [], [], []
+        for block in blocks:
+            raw_len = sum(len(raws[i]) for i in block)
+            concat = np.concatenate([ids_list[i] for i in block])
+            bl_zstd.append(raw_len / len(zc19.compress(_pack_ids(concat, cb))))
+            varint = leb128_encode(rank_of[concat])
+            bl_lzma.append(raw_len / len(lzma.compress(varint, format=lzma.FORMAT_RAW, filters=LZMA_FILTERS)))
+            c = constriction.stream.stack.AnsCoder()
+            c.encode_reverse(concat.astype(np.int32), model)
+            bl_ans.append(raw_len / len(c.get_compressed().tobytes()))
+
+        tb[(domain, "zstd-over-IDs", "point")] = pt_zstd
+        tb[(domain, "zstd-over-IDs", "block")] = bl_zstd
+        tb[(domain, "Kalcher(LZMA)", "point")] = pt_lzma
+        tb[(domain, "Kalcher(LZMA)", "block")] = bl_lzma
+        tb[(domain, "+ANS", "point")] = pt_ans
+        tb[(domain, "+ANS", "block")] = bl_ans
+        print(f"  {domain} ({tok}): {len(blocks)} blocks, {len(raws)} docs")
+
+    print(f"\n{'=' * 92}")
+    print("  TOKEN-NATIVE point vs block (median ratio vs raw UTF-8), 512-tok docs")
+    print(f"{'=' * 92}")
+    print(f"  {'method':<16}{'grain':<7}{'prose':>10}{'code':>10}{'hindi':>10}")
+    METHODS_TB = ["zstd-over-IDs", "Kalcher(LZMA)", "+ANS"]
+    tb_med = {}
+    for m in METHODS_TB:
+        for g in ["point", "block"]:
+            row = f"  {m:<16}{g:<7}"
+            for d in DOMAINS:
+                med = float(np.median(tb[(d, m, g)]))
+                tb_med[f"{d}|{m}|{g}"] = round(med, 3)
+                row += f"{med:>9.2f}x"
+            print(row)
+
+    print(f"\n  +ANS is order-0 (static unigram): block ratio should NOT exceed point")
+    print(f"  (any tiny move is just amortized per-stream framing). Confirm:")
+    for d in DOMAINS:
+        p, b = tb_med[f"{d}|+ANS|point"], tb_med[f"{d}|+ANS|block"]
+        print(f"    {d:<6} +ANS point {p:.2f}x  block {b:.2f}x  (delta {b - p:+.2f})")
+
+    out_path = os.path.join(os.path.dirname(__file__), "token_blocks_results.json")
+    with open(out_path, "w") as f:
+        json.dump({
+            "config": {"chunk_size": CS, "block_bytes": LZ4_BLOCK_BYTES,
+                       "block_max_docs": LZ4_BLOCK_MAX_DOCS, "n_docs": LZ4_BLOCK_N_DOCS,
+                       "seed": 9012, "tokenizer_per_corpus": CORPUS_TOK,
+                       "note": "zstd-over-IDs = zstd-19 over packed token-ID bytes; "
+                               "Kalcher(LZMA) = LZMA9e over freq-remapped LEB128 IDs; "
+                               "+ANS = static-unigram ANS (order-0). Block concatenates a "
+                               "block's token IDs and compresses the whole block."},
+            "median_ratio": tb_med,
+        }, f, indent=2)
+    print(f"\nSaved to token_blocks_results.json")
+    sys.exit(0)
+
+
+if "--read-2x2" in sys.argv:
+    print("=== 2x2 single-document READ latency (us to retrieve ONE doc as token IDs) ===")
+    lz4c, lz4d = lz4.frame.compress, lz4.frame.decompress
+    zc19 = zstd.ZstdCompressor(level=19)
+    zd = zstd.ZstdDecompressor()
+    CS, N_READS = 512, 40
+    read_out = {}
+    for domain in DOMAINS:
+        tok, enc, vocab, cb, rank_of, model = _token_setup(domain)
+        texts, raws, ids_list = _sample_docs(domain, CS, enc)
+        blocks = _group_blocks(raws)
+
+        # doc -> (block index, byte offset in block, id offset in block)
+        doc_meta = {}
+        byte_blocks, id_blocks = [], []
+        for bi, block in enumerate(blocks):
+            boff, ioff = 0, 0
+            for i in block:
+                doc_meta[i] = (bi, boff, len(raws[i]), ioff, len(ids_list[i]))
+                boff += len(raws[i])
+                ioff += len(ids_list[i])
+            byte_blocks.append(lz4c(b"".join(raws[i] for i in block)))
+            id_blocks.append(zc19.compress(_pack_ids(np.concatenate([ids_list[i] for i in block]), cb)))
+        byte_pt = [lz4c(raw) for raw in raws]
+        # token/document representative: static-ANS payload (decode returns IDs, no tokenize)
+        ans_pt = []
+        for ids in ids_list:
+            c = constriction.stream.stack.AnsCoder()
+            c.encode_reverse(ids.astype(np.int32), model)
+            ans_pt.append(c.get_compressed().tobytes())
+
+        targets = list(range(min(N_READS, len(raws))))
+
+        def q_byte_doc(i):
+            text = lz4d(byte_pt[i]).decode("utf-8")
+            return enc.encode(text, disallowed_special=())
+
+        def q_byte_block(i):
+            bi, boff, blen, _, _ = doc_meta[i]
+            full = lz4d(byte_blocks[bi])
+            text = full[boff:boff + blen].decode("utf-8")
+            return enc.encode(text, disallowed_special=())
+
+        def q_tok_doc(i):
+            c2 = constriction.stream.stack.AnsCoder(np.frombuffer(ans_pt[i], dtype=np.uint32).copy())
+            return c2.decode(model, len(ids_list[i]))
+
+        def q_tok_block(i):
+            bi, _, _, ioff, n = doc_meta[i]
+            total = sum(len(ids_list[j]) for j in blocks[bi])
+            allids = _unpack_ids(zd.decompress(id_blocks[bi]), total, cb)
+            return allids[ioff:ioff + n]
+
+        cell = {}
+        for label, fn in [("byte/document", q_byte_doc), ("byte/block", q_byte_block),
+                          ("token/document", q_tok_doc), ("token/block", q_tok_block)]:
+            ts = [T.timed_once_serving(lambda i=i: fn(i)) for i in targets]
+            cell[label] = T.bootstrap_ci(np.array(ts), RNG)
+        read_out[domain] = cell
+        print(f"  {domain} ({tok}) done, {len(targets)} single-doc reads/cell")
+
+    print(f"\n{'=' * 84}")
+    print("  2x2 SINGLE-DOCUMENT READ LATENCY (us/read, serving-cold), retrieve one doc as IDs")
+    print(f"{'=' * 84}")
+    print(f"  {'quadrant':<16}{'prose':>18}{'code':>18}{'hindi':>18}")
+    QUADS = ["byte/document", "byte/block", "token/document", "token/block"]
+    for q in QUADS:
+        row = f"  {q:<16}"
+        for d in DOMAINS:
+            m, ci = read_out[d][q]
+            row += f"{m:>10.1f}[{ci[0]:.0f},{ci[1]:.0f}]".rjust(18)
+        print(row)
+
+    out_path = os.path.join(os.path.dirname(__file__), "read_latency_2x2_results.json")
+    with open(out_path, "w") as f:
+        json.dump({
+            "config": {"chunk_size": CS, "n_reads_per_cell": N_READS, "seed": 9012,
+                       "tokenizer_per_corpus": CORPUS_TOK,
+                       "methods": {"byte/document": "LZ4 point decompress + tokenize",
+                                   "byte/block": "LZ4 block decompress (whole block) + slice one doc + tokenize",
+                                   "token/document": "static-ANS decode one chunk -> IDs (no tokenize)",
+                                   "token/block": "zstd-19 block decompress (whole block) + unpack + slice one doc's IDs"},
+                       "timing": "tnbench.timed_once_serving (64MB cache sweep then one shot), "
+                                 "median + 90% bootstrap CI over N_READS single-doc reads"},
+            "read_us": {f"{d}|{q}": read_out[d][q] for d in DOMAINS for q in QUADS},
+        }, f, indent=2)
+    print(f"\nSaved to read_latency_2x2_results.json")
+    sys.exit(0)
 
 
 ZSTD_DICT_SIZE = 112 * 1024  # matches the WikiText post's trained-dict size

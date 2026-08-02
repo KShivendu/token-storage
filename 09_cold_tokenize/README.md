@@ -14,11 +14,13 @@ seed 3344, single core (`RAYON_NUM_THREADS=1`). Median µs/chunk, bootstrap 90% 
 
 ## Headline
 
-> Tokenizing a fresh 512-token English chunk costs **~120 µs** (r50k), detokenizing
-> **~20 µs**, single core — when the tokenizer's ranks table is warm in CPU cache.
+> Tokenizing a fresh 512-token English chunk costs **~150 µs** (r50k), detokenizing
+> **~28 µs**, single core — when the tokenizer's ranks table is warm in CPU cache.
 > Under the real serving mix, where each read interleaves decompression and other
-> work that evicts that table, cold tokenize rises to **~210 µs** and detokenize to
-> **~40 µs** (the paper's ~283 µs r50k figure is this cache-evicted condition).
+> work that evicts that table, cold tokenize rises to **~250 µs** and detokenize to
+> **~45 µs**. Serving-cold is the condition the paper reports, and it independently
+> reproduces in `03_latency`'s grid (247 µs r50k) and in `07_kalcher_baseline`'s
+> interleaved loop (283 µs).
 
 ## Two cold definitions (they differ ~2×, and the difference matters)
 
@@ -34,23 +36,34 @@ serving does not:
   multi-MB ranks table is cold too — reproducing the paper's mixed-loop
   condition where tokenize is interleaved with decompress/codec work.
 
+The serving-cold timer now lives in `tnbench.timed_once_serving`, so
+`03_latency/bench_latency_grid.py` charges the byte path with the same protocol.
+Before that it used the plain `timed_once`, which reported r50k tokenize at
+~125 µs — text-cold, roughly half the real cost, and inconsistent with this file.
+**Serving-cold is the number the paper reports.**
+
 ## Results (median µs/chunk, English C4, 512-tok, single core)
 
 ### Tokenize (encode, IDs ← text)
 
 | tokenizer | text-cold | serving-cold | warm (30-rep) | serving-cold / warm | cold µs / 1k UTF-8 B | median UTF-8 B/chunk |
 | --------- | --------: | -----------: | ------------: | ------------------: | -------------------: | -------------------: |
-| r50k      | 116.1     | **207.9**    | 106.2         | 1.96×               | 49.6                 | 2344 |
-| cl100k    | 131.4     | **246.4**    | 123.9         | 1.99×               | 54.3                 | 2406 |
-| o200k     | 121.9     | **235.2**    | 81.5          | 2.87×               | 50.7                 | 2438 |
+| r50k      | 148.7     | **248.5**    | 133.7         | 1.86×               | 62.8                 | 2344 |
+| cl100k    | 174.7     | **290.6**    | 154.8         | 1.88×               | 72.7                 | 2406 |
+| o200k     | 129.6     | **267.0**    | 100.8         | 2.65×               | 53.7                 | 2438 |
 
 ### Detokenize (decode, text ← IDs)
 
 | tokenizer | text-cold | serving-cold | warm (30-rep) | cold / warm |
 | --------- | --------: | -----------: | ------------: | ----------: |
-| r50k      | 20.8      | 42.2         | 7.6           | 2.72× |
-| cl100k    | 30.5      | 45.1         | 7.7           | 3.97× |
-| o200k     | 20.8      | 51.3         | 7.9           | 2.62× |
+| r50k      | 28.0      | **45.2**     | 9.9           | 2.82× |
+| cl100k    | 32.2      | **43.6**     | 9.8           | 3.28× |
+| o200k     | 36.2      | **50.8**     | 9.9           | 3.66× |
+
+Both tables are from a P-core-pinned run (`taskset -c 4`). An earlier unpinned run
+reported r50k tokenize serving-cold at 207.9 µs against 248.5 µs here, because an
+unpinned single-core bench can be migrated onto this box's 2.5 GHz LP-E cores. See
+`LATENCY_RULES_OF_THUMB.md`.
 
 (µs-per-1k-UTF-8-byte is reported because o200k/cl100k pack slightly more text
 into 512 tokens; per byte all three land at **~50 µs/1k UTF-8 B** to tokenize
@@ -67,15 +80,18 @@ cold — the per-chunk and per-byte views tell complementary stories.)
   the big ~2–2.9× cold/warm ratio the post cites is **serving-cold** — the ranks
   table being evicted from cache by the decompression/other work between reads.
   For a serving-latency argument (reads interleaved with real work), the
-  **serving-cold column (~210–250 µs tokenize) is the honest number**; the
+  **serving-cold column (~250–290 µs tokenize) is the honest number**; the
   text-cold column is the floor you'd only hit in a tight tokenize loop.
 - **All three tokenizers are within ~1.2× of each other** on cold tokenize
-  (r50k 208, o200k 235, cl100k 246 µs serving-cold), and essentially identical
-  (~50 µs/1k B) once normalized per byte — the "byte path pays a few-hundred-µs
+  (r50k 248, o200k 267, cl100k 291 µs serving-cold), and essentially identical
+  (~55–73 µs/1k B) once normalized per byte — the "byte path pays a few-hundred-µs
   cold tokenize per retrieved chunk" claim holds across vocabularies, not just
   r50k.
 - **Caveat:** single-shot cold timings are inherently noisy; 100 distinct chunks
   + bootstrap smooth it, but expect ±10–20 µs run-to-run on the cold columns.
   The serving-cold proxy (64 MB sweep) is a synthetic cache-evictor; the paper's
-  283 µs came from real interleaved codec work, so treat ~210–283 µs as the
+  283 µs came from real interleaved codec work, so treat ~240–283 µs as the
   serving-cold band for r50k rather than a single point.
+- **Pin to a P-core.** This is a single-core bench on a hybrid CPU. Unpinned runs
+  can migrate onto a 2.5 GHz LP-E core and inflate every column ~1.6×, which is
+  the largest source of run-to-run disagreement between committed result files.

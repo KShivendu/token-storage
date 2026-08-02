@@ -25,15 +25,20 @@ Byte-codec reference (tokenizer-independent, measured once per domain on the
 r50k chunk sample): LZ4 / gzip-9 / zstd-19 / brotli-q11 / zstd --train, reported
 as compress_only + decompress_only components (as 03_latency now does). The byte
 path's mandatory tokenize/detokenize tax is reported per tokenizer as
-TEXT-COLD single shots (timed_once). NOTE: text-cold understates the true
-serving-cold cost, because the loop keeps the tokenizer's rank table
-cache-resident. The eviction-based serving-cold number the PAPER uses (~280us r50k
-tokenize) comes from 09_cold_tokenize's synthetic evictor, not this file. The JSON
-key `tokenize_serving_cold_us` is thus text-cold (~110-170us); read it as a lower
-bound.
+SERVING-COLD single shots (timed_once_serving): the CPU cache is swept with a
+64 MB buffer before each shot, so the tokenizer's multi-MB rank table is cold, as
+it is in real serving where interleaved codec and model work evicts it. This is
+the same protocol as 09_cold_tokenize, so `tokenize_serving_cold_us` is now the
+serving-cold cost (English: r50k 240us, cl100k 306us, o200k 281us) instead of the
+~97-145us text-cold figure a back-to-back loop produces. 09_cold_tokenize's
+dedicated bench independently gets 248/291/267us on the same protocol.
+
+RUN PINNED: `taskset -c 4 env RAYON_NUM_THREADS=1 ... uv run python <this>`. This
+is a single-core bench on a hybrid CPU (P-cores 4.8GHz, LP-E 2.5GHz); an unpinned
+run can migrate onto an LP-E core and inflate every cell ~1.6x.
 
 Conventions: codec ops = timed_reps (warm, median-of-30); tokenize/detokenize =
-timed_once (text-cold single shot, understates serving); per-cell deterministic seeds
+timed_once_serving (cache-evicted single shot); per-cell deterministic seeds
 default_rng([SEED, tok_idx, domain_idx]); full-train rank/ANS tables; ratios and
 round-trip asserts kept. English (prose) is the headline; all domains computed.
 """
@@ -54,7 +59,7 @@ import constriction
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from tnbench import (
-    load_ids, make_chunks, bootstrap_ci, timed_reps, timed_once, seeded_rng,
+    load_ids, make_chunks, bootstrap_ci, timed_reps, timed_once, timed_once_serving, seeded_rng,
     pack3, unpack3, leb128_encode, leb128_decode, svb_encode_arr, svb_decode_arr,
     build_rank_table, build_ans_model, zstd_c22, zstd_d, LZMA_FILTERS,
 )
@@ -158,16 +163,26 @@ def run_cell(domain, tok, enc, vocab, is_r50k, rng):
     ratio = {m: [] for m in TOKEN_METHODS}
     tok_cold, detok_cold = [], []
 
+    # Serving-cold tokenize / detokenize (the byte path's mandatory tax) runs in
+    # its OWN pass, before the codec loop. timed_once_serving sweeps 64 MB to
+    # evict the tokenizer's multi-MB rank table, as real serving does, which is
+    # why this reports ~240us for r50k where a plain timed_once reported ~125us
+    # (the back-to-back loop kept the table resident). Keeping it in a separate
+    # pass means the sweep does not pollute the codec timings below.
+    # `.tolist()` is hoisted OUT of the timed lambda: it is numpy-to-list marshalling
+    # this harness happens to need, not part of detokenize, and charging it inflated
+    # detokenize ~20% (55us vs 09_cold_tokenize's 45us for r50k) on the same protocol.
+    for text in texts:
+        ids_list = enc.encode(text, disallowed_special=())
+        tok_cold.append(timed_once_serving(lambda t=text: enc.encode(t, disallowed_special=())))
+        detok_cold.append(timed_once_serving(lambda i=ids_list: enc.decode(i)))
+
     for text in texts:
         ids = np.array(enc.encode(text, disallowed_special=()), dtype=np.int64)
         n = len(ids)
         raw_len = len(text.encode("utf-8"))
         remapped = rank_of[ids]
         varint = leb128_encode(remapped)
-
-        # serving-cold tokenize / detokenize (the byte path's mandatory tax)
-        tok_cold.append(timed_once(lambda t=text: enc.encode(t, disallowed_special=())))
-        detok_cold.append(timed_once(lambda i=ids: enc.decode(i.tolist())))
 
         # ---- raw pack ----
         packed = ids.astype(np.uint16).tobytes() if fits16 else pack3(ids)
@@ -292,7 +307,7 @@ def main():
             "dict": f"+dict = zstd-22, {DICT_SIZE // 1024}K, corpus-trained on RAW PACKED token-ID "
                     "bytes (uint16/3-byte); dict-freqvarint = old comparison (freq-remap+LEB128 varint)",
             "seed_scheme": "per-cell default_rng([SEED, tok_idx, domain_idx])",
-            "timing": "codec ops warm median-of-30 (timed_reps); tokenize/detokenize serving-cold single shot (timed_once)",
+            "timing": "codec ops warm median-of-30 (timed_reps). tokenize/detokenize serving-cold single shot (timed_once_serving): 64MB cache sweep before each shot so the rank table is evicted, same protocol as 09_cold_tokenize",
             "read": "to token IDs incl. codec decode (+dict: unpack; +freq/Kalcher/dict-freqvarint: LEB128 + rank un-permute)",
             "write": "from token IDs incl. codec compress (+dict: pack + compress)",
         },

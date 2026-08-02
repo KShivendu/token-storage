@@ -1,0 +1,105 @@
+{
+  "config": {
+    "chunk_size": 512,
+    "n_reads_per_cell": 40,
+    "seed": 9012,
+    "tokenizer_per_corpus": {
+      "prose": "r50k",
+      "code": "cl100k",
+      "hindi": "o200k"
+    },
+    "methods": {
+      "byte/document": "LZ4 point decompress + tokenize",
+      "byte/block": "LZ4 block decompress (whole block) + slice one doc + tokenize",
+      "token/document": "static-ANS decode one chunk -> IDs (no tokenize)",
+      "token/block": "zstd-19 block decompress (whole block) + unpack + slice one doc's IDs"
+    },
+    "timing": "tnbench.timed_once_serving (64MB cache sweep then one shot), median + 90% bootstrap CI over N_READS single-doc reads"
+  },
+  "read_us": {
+    "prose|byte/document": [
+      287.8694995160913,
+      [
+        279.14099882764276,
+        294.2925002571428
+      ]
+    ],
+    "prose|byte/block": [
+      304.82199963444145,
+      [
+        294.3110002888716,
+        313.0839995719725
+      ]
+    ],
+    "prose|token/document": [
+      89.54949953476898,
+      [
+        86.75400022184476,
+        92.69600104744313
+      ]
+    ],
+    "prose|token/block": [
+      39.76199877797626,
+      [
+        38.632500036328565,
+        40.54949931742158
+      ]
+    ],
+    "code|byte/document": [
+      217.1634996557259,
+      [
+        209.7155011142604,
+        226.1829995404696
+      ]
+    ],
+    "code|byte/block": [
+      231.57899977377383,
+      [
+        224.4119996248628,
+        240.5655004622531
+      ]
+    ],
+    "code|token/document": [
+      76.7659994380665,
+      [
+        72.31400104501517,
+        79.37749887787504
+      ]
+    ],
+    "code|token/block": [
+      79.12250021036016,
+      [
+        77.52800047455821,
+        82.26249974541133
+      ]
+    ],
+    "hindi|byte/document": [
+      158.67149977566442,
+      [
+        151.87100052571623,
+        164.75299980811542
+      ]
+    ],
+    "hindi|byte/block": [
+      173.87299976689974,
+      [
+        168.6810001046979,
+        180.47682569886092
+      ]
+    ],
+    "hindi|token/document": [
+      85.69599958718754,
+      [
+        82.71950082416879,
+        89.2195002961671
+      ]
+    ],
+    "hindi|token/block": [
+      67.92950080125593,
+      [
+        66.70299990219064,
+        69.09750027261907
+      ]
+    ]
+  }
+}

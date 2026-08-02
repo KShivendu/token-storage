@@ -14,9 +14,14 @@ Timing conventions (named, used consistently across benches):
   - timed_reps(fn, reps)  WARM: median of `reps` back-to-back calls per chunk.
                           Robust sample for sub-/few-microsecond ops whose single
                           perf_counter shot is dominated by scheduler/GC noise.
-  - timed_once(fn)        SERVING-COLD: one perf_counter shot. Used for
-                          tokenize/detokenize (100s of us; a warm 30-rep loop
-                          would understate the real cold-text serving cost).
+  - timed_once(fn)        TEXT-COLD: one perf_counter shot on unseen input. A
+                          back-to-back loop still keeps a big lookup table
+                          cache-resident, so this is right for codec ops but a
+                          ~2x UNDERSTATEMENT for tokenize/detokenize.
+  - timed_once_serving(fn) SERVING-COLD: evict the CPU cache, then one shot. This
+                          is the condition the paper reports for tokenize and
+                          detokenize, where interleaved codec and model work
+                          evicts the tokenizer's multi-MB rank table between reads.
 
 Heavy/optional deps (pyfastpfor, constriction) are imported lazily inside the
 functions that need them, so this module imports cleanly in a minimal env.
@@ -87,8 +92,32 @@ def timed_once(fn):
     """TEXT-COLD: single perf_counter shot, microseconds. The input text is cold on
     first touch, but back-to-back calls in a loop keep a large lookup table (e.g. a
     tokenizer's rank table) cache-resident, so this is NOT the eviction-based
-    serving-cold cost. For that (rank table evicted between reads, ~208-283us for r50k
-    tokenize), see 09_cold_tokenize's synthetic-evictor measurement."""
+    serving-cold cost. For tokenize/detokenize use `timed_once_serving` instead."""
+    t0 = time.perf_counter()
+    fn()
+    t1 = time.perf_counter()
+    return (t1 - t0) * 1e6
+
+
+# 64 MB sweep, sized to overflow any current server LLC, so the tokenizer's
+# multi-MB rank table is evicted between shots. This reproduces real serving,
+# where each retrieved chunk's tokenize is interleaved with decompression and
+# model work that pollutes the cache. A back-to-back tokenize loop instead keeps
+# the table resident and reports ~2x too fast (see 09_cold_tokenize).
+_POLLUTE = np.ones(8 * 1024 * 1024, dtype=np.int64)
+
+
+def cache_pollute():
+    """Evict the CPU cache by sweeping a 64 MB buffer."""
+    _POLLUTE[:] += 1
+
+
+def timed_once_serving(fn):
+    """SERVING-COLD: evict the CPU cache, then a single perf_counter shot,
+    microseconds. Cold input AND cold lookup table. This is the number the paper
+    reports for the byte path's mandatory tokenize (~208-283us per 512-token
+    English chunk, r50k) and detokenize (~42-51us)."""
+    cache_pollute()
     t0 = time.perf_counter()
     fn()
     t1 = time.perf_counter()

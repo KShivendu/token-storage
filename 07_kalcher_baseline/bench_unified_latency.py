@@ -78,6 +78,13 @@ def main():
         # original chunk IDs only at chunk boundaries -- expected for a byte
         # codec, and exactly the tokenize cost we want to charge it).
         assert lz4f.decompress(lz4_payload) == text_bytes
+        # NOTE: these two timed_once shots land at serving-cold (~283us tokenize)
+        # only INCIDENTALLY -- the ANS/LZMA/zstd work later in this same loop
+        # iteration evicts the rank table between chunks. That is fragile, since
+        # the number then depends on loop composition. 03_latency/bench_latency_grid.py
+        # supersedes this file for Table 2 and makes the eviction explicit via
+        # tnbench.timed_once_serving, which independently reproduces ~289us r50k.
+        # Left as-is so the committed taskB_english_unified_latency matches its code.
         detok_us = timed_once(lambda i=ids: r50k.decode(i.tolist()))
         compress_us = timed_reps(lambda b=text_bytes: lz4f.compress(b))
         decompress_us = timed_reps(lambda p=lz4_payload: lz4f.decompress(p))

@@ -1,0 +1,35 @@
+{
+  "config": {
+    "chunk_size": 512,
+    "block_bytes": 16384,
+    "block_max_docs": 128,
+    "n_docs": 300,
+    "seed": 9012,
+    "tokenizer_per_corpus": {
+      "prose": "r50k",
+      "code": "cl100k",
+      "hindi": "o200k"
+    },
+    "note": "zstd-over-IDs = zstd-19 over packed token-ID bytes; Kalcher(LZMA) = LZMA9e over freq-remapped LEB128 IDs; +ANS = static-unigram ANS (order-0). Block concatenates a block's token IDs and compresses the whole block."
+  },
+  "median_ratio": {
+    "prose|zstd-over-IDs|point": 2.741,
+    "code|zstd-over-IDs|point": 2.574,
+    "hindi|zstd-over-IDs|point": 2.91,
+    "prose|zstd-over-IDs|block": 3.017,
+    "code|zstd-over-IDs|block": 3.289,
+    "hindi|zstd-over-IDs|block": 4.0,
+    "prose|Kalcher(LZMA)|point": 3.178,
+    "code|Kalcher(LZMA)|point": 3.429,
+    "hindi|Kalcher(LZMA)|point": 4.942,
+    "prose|Kalcher(LZMA)|block": 3.416,
+    "code|Kalcher(LZMA)|block": 3.935,
+    "hindi|Kalcher(LZMA)|block": 6.026,
+    "prose|+ANS|point": 3.331,
+    "code|+ANS|point": 3.087,
+    "hindi|+ANS|point": 5.993,
+    "prose|+ANS|block": 3.345,
+    "code|+ANS|block": 2.833,
+    "hindi|+ANS|block": 5.955
+  }
+}

@@ -36,7 +36,9 @@ import numpy as np
 import tiktoken
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from tnbench import make_chunks, bootstrap_ci, timed_once, timed_reps, load_ids
+from tnbench import (
+    make_chunks, bootstrap_ci, timed_once, timed_reps, timed_once_serving, load_ids,
+)
 
 CHUNK_SIZE = 512
 N_CHUNKS = 100          # distinct cold chunks, more than the 40 baseline to smooth single-shot noise
@@ -47,25 +49,9 @@ TOKENIZERS = {"r50k": "r50k_base", "cl100k": "cl100k_base", "o200k": "o200k_base
 r50k = tiktoken.get_encoding("r50k_base")
 
 
-# 64 MB sweep to evict the tokenizer's multi-MB ranks table from CPU cache
-# between shots -- reproduces the REAL serving condition where each retrieved
-# chunk's tokenize is interleaved with decompression/other work that pollutes
-# the cache (this is why the paper's mixed-loop r50k cold was ~283us while a
-# back-to-back tokenize loop, ranks-table cache-hot, is far lower).
-_POLLUTE = np.ones(8 * 1024 * 1024, dtype=np.int64)
-
-
-def _cache_pollute():
-    _POLLUTE[:] += 1
-
-
-def timed_once_serving(fn):
-    """Cold text AND cold tokenizer-in-cache: evict caches, then single shot."""
-    _cache_pollute()
-    t0 = time.perf_counter()
-    fn()
-    t1 = time.perf_counter()
-    return (t1 - t0) * 1e6
+# `timed_once_serving` (64 MB cache sweep before each shot) now lives in tnbench
+# so 03_latency's grid measures the byte path's tokenize tax the same way. This
+# file is where the text-cold vs serving-cold gap is characterised.
 
 
 def main():
