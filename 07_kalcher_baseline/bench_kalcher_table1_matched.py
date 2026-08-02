@@ -40,12 +40,10 @@ def full_train_zstd_compressor(domain, train_r50k):
     consistent table. Cached per domain. No numpy-RNG draw (keeps the aligned
     run's chunk selection bit-identical)."""
     if domain not in _zdict_cache:
-        samples = [
-            r50k.decode(train_r50k[i : i + 512].tolist()).encode("utf-8")
-            for i in range(0, (len(train_r50k) // 512) * 512, 512)
-        ]
-        zdict = zstd.ZstdCompressionDict(zstd.train_dictionary(ZSTD_DICT_SIZE, samples).as_bytes())
-        _zdict_cache[domain] = zstd.ZstdCompressor(level=19, dict_data=zdict)
+        # single source of truth: the shared full-train recipe in tnbench (identical
+        # logic to the previous inline version, so Table 1 numbers are unchanged).
+        from tnbench import full_train_zstd_dict
+        _zdict_cache[domain] = full_train_zstd_dict(train_r50k, r50k, dict_size=ZSTD_DICT_SIZE)[0]
     return _zdict_cache[domain]
 
 DOMAINS = ["prose", "code", "hindi"]

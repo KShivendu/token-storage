@@ -61,7 +61,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from tnbench import (
     load_ids, make_chunks, bootstrap_ci, timed_reps, timed_once, timed_once_serving, seeded_rng,
     pack3, unpack3, leb128_encode, leb128_decode, svb_encode_arr, svb_decode_arr,
-    build_rank_table, build_ans_model, zstd_c22, zstd_d, LZMA_FILTERS,
+    build_rank_table, build_ans_model, full_train_zstd_dict, zstd_c22, zstd_d, LZMA_FILTERS,
 )
 
 DOMAINS = ["prose", "code", "hindi"]
@@ -107,15 +107,11 @@ def byte_codec_components(texts, train, rng):
     """compress_only + decompress_only (warm) and ratio for each byte codec, on
     the given test texts. Tokenizer-independent."""
     raw_byte_lists = [t.encode("utf-8") for t in texts]
-    # zstd --train byte dict on this domain's train utf-8 windows (matches 03)
-    train_chunks_bytes = [
-        r50k.decode(train[i:i + CHUNK_SIZE].tolist()).encode("utf-8")
-        for i in range(0, min(len(train), CHUNK_SIZE * 400), CHUNK_SIZE)
-    ]
-    zdict = zstd.ZstdCompressionDict(zstd.train_dictionary(112 * 1024, train_chunks_bytes).as_bytes())
-    zdict.precompute_compress(level=19)
+    # zstd --train: the shared FULL-train-split recipe from tnbench (same one Table 1
+    # uses), NOT a 400-window subset. On code the full split reaches ~3.47x vs ~2.80x
+    # from 400 windows, so this keeps the sweep's zstd --train consistent with Table 1.
     zc19, zd19 = zstd.ZstdCompressor(level=19), zstd.ZstdDecompressor()
-    zcd, zdd = zstd.ZstdCompressor(level=19, dict_data=zdict), zstd.ZstdDecompressor(dict_data=zdict)
+    zcd, zdd = full_train_zstd_dict(train, r50k)
     codecs = {
         "LZ4": (lz4f.compress, lz4f.decompress),
         "gzip-9": (lambda b: gzip.compress(b, 9), gzip.decompress),
@@ -124,7 +120,11 @@ def byte_codec_components(texts, train, rng):
         "zstd --train": (zcd.compress, zdd.decompress),
     }
     out = {}
-    for name, (comp, decomp) in codecs.items():
+    # Iterate the canonical BYTE_CODECS list (single source of truth), not codecs.items(),
+    # so the byte-codec set can never silently diverge from Table 1 / the chunk-sweep: a
+    # canonical codec missing an implementation here raises KeyError instead of vanishing.
+    for name in BYTE_CODECS:
+        comp, decomp = codecs[name]
         ratios, ct, dt = [], [], []
         for raw in raw_byte_lists:
             ct.append(timed_reps(lambda r=raw: comp(r)))
@@ -282,7 +282,11 @@ def chunk_sweep():
     global CHUNK_SIZE
     CHUNK_SIZES = [512, 1024, 2048, 4096]
     TOK_SHOW = ["raw", "+freq", "+ANS", "+dict"]
-    BYTE_SHOW = ["LZ4", "zstd-19", "brotli-q11"]
+    # Draw byte codecs from the canonical module-level BYTE_CODECS (LZ4, gzip-9, zstd-19,
+    # brotli-q11, zstd --train) so the sweep can never again silently drop zstd --train or
+    # gzip-9 relative to Table 1. zstd --train / gzip-9 are byte codecs, so like the others
+    # they are tokenizer-independent and measured once per (corpus, chunk_size).
+    BYTE_SHOW = list(BYTE_CODECS)
     ALLM = BYTE_SHOW + TOK_SHOW
     enc_cache = {}
     sweep = {}  # f"{tok}|{domain}|{cs}" -> {tokenize_cold_us, detokenize_cold_us, methods}

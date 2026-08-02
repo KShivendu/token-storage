@@ -229,3 +229,24 @@ def build_ans_model(ids, vocab):
     counts += np.bincount(np.asarray(ids, dtype=np.int64), minlength=vocab)
     probs = counts.astype(np.float64) / counts.sum()
     return constriction.stream.model.Categorical(probs, perfect=False)
+
+
+# ── zstd --train, FULL train split (the trained byte-codec baseline) ──────────
+# The single source of truth for the "zstd --train" byte codec, shared by the
+# Table 1 path (07_kalcher_baseline/bench_kalcher_table1_matched.py) and the
+# 03_latency byte reference / chunk-size sweep so the two can never diverge. The
+# dictionary is trained on EVERY 512-token window of the corpus's own train split
+# (never the held-out test), decoded to UTF-8 via the r50k encoder the corpus is
+# stored in. Training on the full split (not a 400-window subset) matters a lot on
+# repetitive corpora like code: full-train reaches ~3.47x vs ~2.80x from 400
+# windows. Deterministic: no numpy-RNG draw (keeps aligned runs bit-identical).
+def full_train_zstd_dict(train_r50k_ids, r50k_enc, window=512, dict_size=112 * 1024, level=19):
+    """Return (compressor, decompressor) for a level-`level` zstd whose `dict_size`
+    dictionary is trained on all `window`-token windows of the train-split ids."""
+    samples = [
+        r50k_enc.decode(train_r50k_ids[i : i + window].tolist()).encode("utf-8")
+        for i in range(0, (len(train_r50k_ids) // window) * window, window)
+    ]
+    zdict = zstd.ZstdCompressionDict(zstd.train_dictionary(dict_size, samples).as_bytes())
+    zdict.precompute_compress(level=level)  # ratio unchanged; avoids ~35x slower per-call dict setup
+    return zstd.ZstdCompressor(level=level, dict_data=zdict), zstd.ZstdDecompressor(dict_data=zdict)
