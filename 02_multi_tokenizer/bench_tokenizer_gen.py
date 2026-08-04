@@ -5,7 +5,18 @@ Same chunking methodology as the rest of the post: 512-token chunks, 40 test
 chunks, RNG seed 3344, ANS table trained on the train split only.
 
 For each tokenizer: uint32/16 raw packing ratio, 3-byte raw packing ratio,
+raw fixed-width token-ID packing at the CORRECT per-vocab byte width, and the
 +static ANS ratio, vs raw UTF-8 bytes.
+
+"raw (correct width)" is the fixed-width token-ID packing the paper reports as a
+baseline: bytes/id is derived from each tokenizer's actual vocab size, never
+hardcoded -- 2 bytes (uint16) for a vocab that fits in 16 bits (r50k), and 3
+bytes (24-bit) for the large-vocab tokenizers (cl100k, o200k, Qwen2.5,
+DeepSeek-V2, Gemma-2 all exceed uint16 but fit in 24 bits). 3 bytes, never 4
+(uint32): the 3-byte packing is the paper's contribution. This is measured over
+the exact same C4 English chunks / seed / methodology as the +ANS column, so the
+raw band and the ANS band are directly comparable. The ratio has a bootstrap CI
+(same bootstrap_ci helper the rest of the suite uses).
 """
 import os
 import sys
@@ -15,7 +26,14 @@ from transformers import AutoTokenizer
 import constriction
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from tnbench import make_chunks as _make_chunks, pack3, build_ans_model, load_ids
+from tnbench import (
+    make_chunks as _make_chunks,
+    pack3,
+    build_ans_model,
+    load_ids,
+    bootstrap_ci,
+    seeded_rng,
+)
 
 CHUNK_SIZE = 512
 N_CHUNKS = 40
@@ -67,10 +85,23 @@ TOKENIZERS = {
     "Gemma-2": HFWrap("google/gemma-2-9b"),
 }
 
-print(f"{'Tokenizer':<14}{'Vocab':>10}{'uint32/16':>12}{'3-byte':>10}{'+ANS':>10}")
-for name, tok in TOKENIZERS.items():
+def bytes_per_id_for(vocab_size):
+    """Fixed-width bytes/id from the actual vocab size (never hardcoded):
+    2 bytes if the vocab fits in uint16, else 3 bytes (24-bit). Large-vocab
+    tokenizers pack in 3 bytes, never 4."""
+    if vocab_size <= 1 << 16:
+        return 2
+    if vocab_size <= 1 << 24:
+        return 3
+    raise ValueError(f"vocab {vocab_size} exceeds 24-bit raw packing")
+
+
+print(f"{'Tokenizer':<14}{'Vocab':>10}{'b/id':>6}{'uint32/16':>12}{'3-byte':>9}{'raw(correct)':>26}{'+ANS':>9}")
+raw_ratios_summary = {}
+for idx, (name, tok) in enumerate(TOKENIZERS.items()):
     vocab_size = tok.vocab_size
     fits_uint16 = vocab_size <= 65536
+    bytes_per_id = bytes_per_id_for(vocab_size)
 
     train_ids = tok.encode(train_text)
     ids_arr_train = np.array(train_ids, dtype=np.int64)
@@ -78,12 +109,15 @@ for name, tok in TOKENIZERS.items():
     model = build_ans_model(ids_arr_train, vocab_size)
 
     narrow_bytes, wide_bytes, ans_bytes, raw_bytes = [], [], [], []
+    raw_correct_bytes = []
     for text, rawlen in zip(texts, raw_byte_lens):
         ids = tok.encode(text)
         ids_arr = np.array(ids, dtype=np.int64)
         raw_bytes.append(rawlen)
         narrow_bytes.append(len(ids) * (2 if fits_uint16 else 4))
         wide_bytes.append(len(pack3(ids_arr)))
+        # raw fixed-width packing at the CORRECT per-vocab byte width
+        raw_correct_bytes.append(len(ids) * bytes_per_id)
 
         c = constriction.stream.stack.AnsCoder()
         ids32 = np.clip(ids_arr, 0, vocab_size - 1).astype(np.int32)
@@ -94,5 +128,23 @@ for name, tok in TOKENIZERS.items():
     narrow_ratio = np.median(raw_bytes / np.array(narrow_bytes))
     wide_ratio = np.median(raw_bytes / np.array(wide_bytes))
     ans_ratio = np.median(raw_bytes / np.array(ans_bytes))
+    # raw (correct width) with a bootstrap CI of the median, using the shared
+    # helper. Per-tokenizer seeded RNG so the CI is reproducible and does not
+    # perturb the chunk-selection RNG (chunks were drawn once, before the loop).
+    raw_per_chunk = raw_bytes / np.array(raw_correct_bytes)
+    raw_med, (raw_lo, raw_hi) = bootstrap_ci(raw_per_chunk, seeded_rng(3344, idx))
+    raw_ratios_summary[name] = (vocab_size, bytes_per_id, raw_med, raw_lo, raw_hi, ans_ratio)
     tag = "(uint16)" if fits_uint16 else ""
-    print(f"{name:<14}{vocab_size:>10}{narrow_ratio:>9.2f}x{tag:<3}{wide_ratio:>9.2f}x  {ans_ratio:>7.2f}x")
+    raw_str = f"{raw_med:.2f}x [{raw_lo:.2f},{raw_hi:.2f}]"
+    print(
+        f"{name:<14}{vocab_size:>10}{bytes_per_id:>6}{narrow_ratio:>9.2f}x{tag:<3}"
+        f"{wide_ratio:>8.2f}x{raw_str:>26}{ans_ratio:>8.2f}x"
+    )
+
+raw_meds = [v[2] for v in raw_ratios_summary.values()]
+ans_meds = [v[5] for v in raw_ratios_summary.values()]
+print(
+    f"\nraw fixed-width band across the six tokenizers: "
+    f"{min(raw_meds):.2f}x - {max(raw_meds):.2f}x  "
+    f"(for reference, +ANS band here: {min(ans_meds):.2f}x - {max(ans_meds):.2f}x)"
+)
