@@ -6,7 +6,7 @@ us as few as ~7 independent chunks at 8k-token length -- not reliable).
 Three domains, streamed (not fully downloaded) from HuggingFace:
   - prose: allenai/c4, en
   - code:  codeparrot/github-code-clean (python)
-  - hindi: allenai/mc4, hi
+  - hindi: wikimedia/wikipedia, 20231101.hi
 
 For each domain: stream documents, tokenize with r50k, split into a TRAIN
 portion (for the static frequency table -- large) and a TEST portion (held

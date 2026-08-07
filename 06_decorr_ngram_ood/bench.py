@@ -1,6 +1,6 @@
 """
 Three supporting analyses for the paper, re-run on the multi-domain corpora
-(prose=C4, code=codeparrot, hindi=mc4-hi) instead of WikiText-103, so all paper
+(prose=C4, code=codeparrot, hindi=Wikipedia-hi) instead of WikiText-103, so all paper
 numbers are on the same corpora:
 
   1. decorrelation  -- byte order-0/order-1 vs token order-0 (bits/byte, held-out).
