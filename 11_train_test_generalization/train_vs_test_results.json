@@ -1,0 +1,294 @@
+{
+  "config": {
+    "chunk_size": 512,
+    "n_chunks": 40,
+    "seed": 9012,
+    "dict_size_bytes": 114688,
+    "max_train_samples": 15000,
+    "methods": [
+      "raw",
+      "+freq",
+      "+ANS",
+      "+dict"
+    ],
+    "tokenizers": [
+      "r50k",
+      "cl100k",
+      "o200k"
+    ],
+    "domains": [
+      "prose",
+      "code",
+      "hindi"
+    ],
+    "statistic": "median ratio = utf8_bytes / compressed_bytes",
+    "note": "reuses tnbench helpers; +dict = 10_code_dict dict-idbytes; +freq = 04_frequency_remap; +ANS/raw = 07 path B. Independent RNG seeds, so absolute test numbers may differ marginally from committed files -- train and test here are apples-to-apples."
+  },
+  "grid": {
+    "r50k": {
+      "prose": {
+        "raw": {
+          "train_ratio": 2.3398,
+          "test_ratio": 2.2959,
+          "delta": 0.0439,
+          "delta_pct": 1.91
+        },
+        "+freq": {
+          "train_ratio": 2.6907,
+          "test_ratio": 2.6715,
+          "delta": 0.0192,
+          "delta_pct": 0.72
+        },
+        "+ANS": {
+          "train_ratio": 3.3907,
+          "test_ratio": 3.3638,
+          "delta": 0.0269,
+          "delta_pct": 0.8
+        },
+        "+dict": {
+          "train_ratio": 3.1741,
+          "test_ratio": 3.1401,
+          "delta": 0.034,
+          "delta_pct": 1.08
+        }
+      },
+      "code": {
+        "raw": {
+          "train_ratio": 1.2178,
+          "test_ratio": 1.1162,
+          "delta": 0.1016,
+          "delta_pct": 9.1
+        },
+        "+freq": {
+          "train_ratio": 1.5695,
+          "test_ratio": 1.4595,
+          "delta": 0.11,
+          "delta_pct": 7.54
+        },
+        "+ANS": {
+          "train_ratio": 2.5776,
+          "test_ratio": 2.4583,
+          "delta": 0.1194,
+          "delta_pct": 4.86
+        },
+        "+dict": {
+          "train_ratio": 3.2984,
+          "test_ratio": 3.0613,
+          "delta": 0.2371,
+          "delta_pct": 7.74
+        }
+      },
+      "hindi": {
+        "raw": {
+          "train_ratio": 0.8428,
+          "test_ratio": 0.8418,
+          "delta": 0.001,
+          "delta_pct": 0.12
+        },
+        "+freq": {
+          "train_ratio": 1.3336,
+          "test_ratio": 1.3295,
+          "delta": 0.0041,
+          "delta_pct": 0.31
+        },
+        "+ANS": {
+          "train_ratio": 2.9707,
+          "test_ratio": 2.9741,
+          "delta": -0.0034,
+          "delta_pct": -0.12
+        },
+        "+dict": {
+          "train_ratio": 4.4832,
+          "test_ratio": 4.4572,
+          "delta": 0.026,
+          "delta_pct": 0.58
+        }
+      }
+    },
+    "cl100k": {
+      "prose": {
+        "raw": {
+          "train_ratio": 1.5994,
+          "test_ratio": 1.6357,
+          "delta": -0.0363,
+          "delta_pct": -2.22
+        },
+        "+freq": {
+          "train_ratio": 2.7735,
+          "test_ratio": 2.8042,
+          "delta": -0.0306,
+          "delta_pct": -1.09
+        },
+        "+ANS": {
+          "train_ratio": 3.4935,
+          "test_ratio": 3.5143,
+          "delta": -0.0208,
+          "delta_pct": -0.59
+        },
+        "+dict": {
+          "train_ratio": 3.0616,
+          "test_ratio": 2.989,
+          "delta": 0.0727,
+          "delta_pct": 2.43
+        }
+      },
+      "code": {
+        "raw": {
+          "train_ratio": 1.389,
+          "test_ratio": 1.4337,
+          "delta": -0.0447,
+          "delta_pct": -3.12
+        },
+        "+freq": {
+          "train_ratio": 2.394,
+          "test_ratio": 2.4211,
+          "delta": -0.027,
+          "delta_pct": -1.12
+        },
+        "+ANS": {
+          "train_ratio": 3.0404,
+          "test_ratio": 3.0832,
+          "delta": -0.0427,
+          "delta_pct": -1.39
+        },
+        "+dict": {
+          "train_ratio": 3.4223,
+          "test_ratio": 3.2465,
+          "delta": 0.1758,
+          "delta_pct": 5.41
+        }
+      },
+      "hindi": {
+        "raw": {
+          "train_ratio": 0.8678,
+          "test_ratio": 0.8737,
+          "delta": -0.006,
+          "delta_pct": -0.68
+        },
+        "+freq": {
+          "train_ratio": 2.0496,
+          "test_ratio": 2.0516,
+          "delta": -0.0021,
+          "delta_pct": -0.1
+        },
+        "+ANS": {
+          "train_ratio": 3.5544,
+          "test_ratio": 3.5165,
+          "delta": 0.0379,
+          "delta_pct": 1.08
+        },
+        "+dict": {
+          "train_ratio": 4.3484,
+          "test_ratio": 4.1827,
+          "delta": 0.1657,
+          "delta_pct": 3.96
+        }
+      }
+    },
+    "o200k": {
+      "prose": {
+        "raw": {
+          "train_ratio": 1.6156,
+          "test_ratio": 1.6145,
+          "delta": 0.0011,
+          "delta_pct": 0.07
+        },
+        "+freq": {
+          "train_ratio": 2.7743,
+          "test_ratio": 2.7233,
+          "delta": 0.051,
+          "delta_pct": 1.87
+        },
+        "+ANS": {
+          "train_ratio": 3.4298,
+          "test_ratio": 3.4038,
+          "delta": 0.026,
+          "delta_pct": 0.76
+        },
+        "+dict": {
+          "train_ratio": 2.9303,
+          "test_ratio": 2.9133,
+          "delta": 0.0169,
+          "delta_pct": 0.58
+        }
+      },
+      "code": {
+        "raw": {
+          "train_ratio": 1.4813,
+          "test_ratio": 1.4103,
+          "delta": 0.071,
+          "delta_pct": 5.03
+        },
+        "+freq": {
+          "train_ratio": 2.4759,
+          "test_ratio": 2.3712,
+          "delta": 0.1047,
+          "delta_pct": 4.42
+        },
+        "+ANS": {
+          "train_ratio": 3.124,
+          "test_ratio": 2.9505,
+          "delta": 0.1734,
+          "delta_pct": 5.88
+        },
+        "+dict": {
+          "train_ratio": 3.349,
+          "test_ratio": 3.4619,
+          "delta": -0.1128,
+          "delta_pct": -3.26
+        }
+      },
+      "hindi": {
+        "raw": {
+          "train_ratio": 2.5829,
+          "test_ratio": 2.6331,
+          "delta": -0.0503,
+          "delta_pct": -1.91
+        },
+        "+freq": {
+          "train_ratio": 4.3789,
+          "test_ratio": 4.4485,
+          "delta": -0.0696,
+          "delta_pct": -1.57
+        },
+        "+ANS": {
+          "train_ratio": 5.7566,
+          "test_ratio": 5.9557,
+          "delta": -0.1991,
+          "delta_pct": -3.34
+        },
+        "+dict": {
+          "train_ratio": 4.9675,
+          "test_ratio": 4.5658,
+          "delta": 0.4017,
+          "delta_pct": 8.8
+        }
+      }
+    }
+  },
+  "verdict_metrics": {
+    "raw_max_abs_delta": 0.1016,
+    "raw_max_abs_delta_pct": 9.1,
+    "dict_delta_pct_range": [
+      -3.26,
+      8.8
+    ],
+    "ans_delta_pct_range": [
+      -3.34,
+      5.88
+    ],
+    "freq_delta_pct_range": [
+      -1.57,
+      7.54
+    ],
+    "largest_gap": {
+      "domain": "hindi",
+      "tokenizer": "o200k",
+      "method": "+dict",
+      "train_ratio": 4.9675,
+      "test_ratio": 4.5658,
+      "delta": 0.4017,
+      "delta_pct": 8.8
+    }
+  }
+}

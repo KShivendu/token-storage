@@ -3,7 +3,22 @@ __pycache__/
 *.pyc
 *.log
 data/corpus/*.npy
+
+# Intermediate result files are ignored by default...
 *_results.json
 full_results_table.json
 zstd_train_fixed_results.json
 summary_tables_*.json
+
+# ...except the ones a paper claim rests on, which must stay public so the
+# tables and footnotes can be checked without re-running the benchmarks.
+!03_latency/agent_writer_results.json
+!03_latency/latency_grid_results.json
+!03_latency/latency_chunksize_sweep_results.json
+!04_frequency_remap/freqremap_results.json
+!04_frequency_remap/freq_split_results.json
+!07_kalcher_baseline/summary_tables_256_512.json
+!11_train_test_generalization/train_vs_test_results.json
+!01_storage_efficiency/full_results_table.json
+!01_storage_efficiency/summary_tables_256_512_2000.json
+!01_storage_efficiency/zstd_train_fixed_results.json
