@@ -1,0 +1,113 @@
+{
+ "config": {
+  "chunk_size_tokens": 512,
+  "n_chunks": 100,
+  "seed": 5566,
+  "timing": "timed_once_serving: 64MB cache sweep, then one shot",
+  "corpus": "prose_test (English C4), 512 IDs in each tokenizer's own encoding"
+ },
+ "tokenizers": {
+  "r50k": {
+   "vocab": 50257,
+   "flat_arena_mb": 0.521859,
+   "tiktoken_serving_cold_us": [
+    38.64450263790786,
+    [
+     37.50299947569147,
+     39.387497963616624
+    ]
+   ],
+   "flat_serving_cold_us": [
+    108.6804986698553,
+    [
+     106.65932459232863,
+     110.59450116590597
+    ]
+   ],
+   "flat_sequential_serving_cold_us": [
+    79.28850027383305,
+    [
+     78.67399690439925,
+     80.37050065468065
+    ]
+   ],
+   "tiktoken_warm_us": [
+    7.986998753040098,
+    [
+     7.923474731796887,
+     8.005998097360134
+    ]
+   ],
+   "stall_ns_tiktoken_cold_minus_warm": 59.87793727513235,
+   "stall_ns_flat_random_minus_sequential": 57.40624686723095
+  },
+  "cl100k": {
+   "vocab": 100277,
+   "flat_arena_mb": 1.045012,
+   "tiktoken_serving_cold_us": [
+    44.97250120039098,
+    [
+     44.23474929353688,
+     45.59499939205125
+    ]
+   ],
+   "flat_serving_cold_us": [
+    127.93949645129032,
+    [
+     126.70184805756435,
+     129.60800086148083
+    ]
+   ],
+   "flat_sequential_serving_cold_us": [
+    82.30450112023391,
+    [
+     80.86250090855174,
+     83.23800284415483
+    ]
+   ],
+   "tiktoken_warm_us": [
+    8.064500434556976,
+    [
+     8.000497473403811,
+     8.162388530763565
+    ]
+   ],
+   "stall_ns_tiktoken_cold_minus_warm": 72.08593899576954,
+   "stall_ns_flat_random_minus_sequential": 89.13085025596956
+  },
+  "o200k": {
+   "vocab": 200019,
+   "flat_arena_mb": 2.197778,
+   "tiktoken_serving_cold_us": [
+    47.43949830299243,
+    [
+     46.6110031993594,
+     48.49299875786528
+    ]
+   ],
+   "flat_serving_cold_us": [
+    124.92849782574922,
+    [
+     122.6860040333122,
+     125.95300358952954
+    ]
+   ],
+   "flat_sequential_serving_cold_us": [
+    84.75800132146105,
+    [
+     84.27400098298676,
+     85.71250145905651
+    ]
+   ],
+   "tiktoken_warm_us": [
+    8.203000106732361,
+    [
+     8.128001354634762,
+     8.279748726636171
+    ]
+   ],
+   "stall_ns_tiktoken_cold_minus_warm": 76.63378553957045,
+   "stall_ns_flat_random_minus_sequential": 78.45800098493783
+  }
+ }
+}
