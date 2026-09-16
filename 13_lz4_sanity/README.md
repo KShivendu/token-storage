@@ -37,6 +37,29 @@ Note **LZ4 fast plateaus at 1.60x** even with unlimited input. Reaching 2.2x
 needs LZ4-HC as well. So "2-2.5x" is specifically *large file + high
 compression*, not a property of LZ4 in general.
 
+## But a real engine never sees a large file
+
+The megabyte rows above are not reachable in a search engine.
+Elasticsearch/Lucene compresses stored fields in **~16 KB blocks** (or 128
+docs, whichever comes first), so 16 KB is the most LZ4 ever gets to work with
+at once. Read the 16 KB row, not the 4 MB one.
+
+That row says 1.41x, and the independent block experiment in `07` -- real
+Lucene-style batching, verified against the `CompressingStoredFieldsWriter`
+source -- measures **1.43x**. Two different code paths, 0.02x apart.
+
+| what | LZ4 ratio | reachable in a search engine? |
+|---|---:|---|
+| 2.3 KB chunk, compressed alone | 1.27x | yes, this is per-document storage |
+| 16 KB block, LZ4 fast | **1.43x** | **yes — this is what Lucene does** |
+| 16 KB block, LZ4-HC | 1.55x | possible, ~10x the encode cost |
+| unbounded input, LZ4 fast | 1.60x | no |
+| unbounded input, LZ4-HC | 2.22x | no — this is the quoted figure |
+
+So the honest ceiling for a Lucene-style byte store is **~1.43x**, and getting
+even to 1.6x would require abandoning block storage entirely. Tokenizer+ANS
+reaches 3.38x on the 512-token chunks a retrieval system actually stores.
+
 ## The talk's actual condition
 
 200 independent 512-token chunks, median **2,296 bytes**:
@@ -65,4 +88,5 @@ Yes, and it is the one production runs. Qdrant, Elasticsearch/Lucene and
 Postgres use LZ4 in fast mode for stored fields precisely because the point is
 speed. Using LZ4-HC would cost ~10x the encode time to gain 4% at this chunk
 size. The block-codec experiment (07) covers the other half of what real
-engines do — batching documents into 16 KB blocks — and gets 1.43x.
+engines do — batching documents into 16 KB blocks — and gets 1.43x, which is
+the number to quote as the realistic ceiling.
