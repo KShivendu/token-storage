@@ -1,0 +1,671 @@
+{
+ "prose": {
+  "tokenizer": "r50k_base",
+  "promoted": [
+   {
+    "id": 262,
+    "rank": 2,
+    "count": 280293,
+    "per_million": 35036.6,
+    "token": "'\u2423the'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 290,
+    "rank": 3,
+    "count": 177252,
+    "per_million": 22156.5,
+    "token": "'\u2423and'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 284,
+    "rank": 4,
+    "count": 170150,
+    "per_million": 21268.7,
+    "token": "'\u2423to'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 286,
+    "rank": 5,
+    "count": 150875,
+    "per_million": 18859.4,
+    "token": "'\u2423of'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 257,
+    "rank": 6,
+    "count": 129883,
+    "per_million": 16235.4,
+    "token": "'\u2423a'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 198,
+    "rank": 7,
+    "count": 125800,
+    "per_million": 15725.0,
+    "token": "'\n'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 287,
+    "rank": 8,
+    "count": 99253,
+    "per_million": 12406.6,
+    "token": "'\u2423in'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 318,
+    "rank": 9,
+    "count": 73973,
+    "per_million": 9246.6,
+    "token": "'\u2423is'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 329,
+    "rank": 10,
+    "count": 65740,
+    "per_million": 8217.5,
+    "token": "'\u2423for'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 447,
+    "rank": 11,
+    "count": 58405,
+    "per_million": 7300.6,
+    "token": "b'\\xe2\\x80'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 326,
+    "rank": 13,
+    "count": 56217,
+    "per_million": 7027.1,
+    "token": "'\u2423that'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 345,
+    "rank": 14,
+    "count": 54543,
+    "per_million": 6817.9,
+    "token": "'\u2423you'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   }
+  ],
+  "demoted": [
+   {
+    "id": 90,
+    "rank": 50256,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "'{'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 124,
+    "rank": 50255,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xc0'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 125,
+    "rank": 50254,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xc1'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 92,
+    "rank": 31124,
+    "count": 13,
+    "per_million": 1.6,
+    "token": "'}'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 144,
+    "rank": 50253,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xd4'",
+    "bytes_before": 2,
+    "bytes_after": 3
+   },
+   {
+    "id": 153,
+    "rank": 50252,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xdd'",
+    "bytes_before": 2,
+    "bytes_after": 3
+   },
+   {
+    "id": 154,
+    "rank": 50251,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xde'",
+    "bytes_before": 2,
+    "bytes_after": 3
+   },
+   {
+    "id": 159,
+    "rank": 50250,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xe3'",
+    "bytes_before": 2,
+    "bytes_after": 3
+   },
+   {
+    "id": 170,
+    "rank": 50249,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xee'",
+    "bytes_before": 2,
+    "bytes_after": 3
+   },
+   {
+    "id": 173,
+    "rank": 50248,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xf1'",
+    "bytes_before": 2,
+    "bytes_after": 3
+   },
+   {
+    "id": 174,
+    "rank": 50247,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xf2'",
+    "bytes_before": 2,
+    "bytes_after": 3
+   },
+   {
+    "id": 175,
+    "rank": 50246,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xf3'",
+    "bytes_before": 2,
+    "bytes_after": 3
+   }
+  ]
+ },
+ "code": {
+  "tokenizer": "cl100k_base",
+  "promoted": [
+   {
+    "id": 286,
+    "rank": 1,
+    "count": 44699,
+    "per_million": 27450.1,
+    "token": "'\u2423\u2423\u2423\u2423\u2423\u2423\u2423'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 262,
+    "rank": 2,
+    "count": 38868,
+    "per_million": 23869.2,
+    "token": "'\u2423\u2423\u2423'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 284,
+    "rank": 3,
+    "count": 28485,
+    "per_million": 17492.9,
+    "token": "'\u2423='",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 198,
+    "rank": 4,
+    "count": 25842,
+    "per_million": 15869.8,
+    "token": "'\n'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 220,
+    "rank": 5,
+    "count": 23671,
+    "per_million": 14536.6,
+    "token": "'\u2423'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 364,
+    "rank": 6,
+    "count": 19040,
+    "per_million": 11692.7,
+    "token": "'\u2423''",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 659,
+    "rank": 7,
+    "count": 18373,
+    "per_million": 11283.0,
+    "token": "'\u2423self'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 310,
+    "rank": 8,
+    "count": 17597,
+    "per_million": 10806.5,
+    "token": "'\u2423\u2423\u2423\u2423\u2423\u2423\u2423\u2423\u2423\u2423\u2423'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 340,
+    "rank": 10,
+    "count": 11868,
+    "per_million": 7288.3,
+    "token": "')\n'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 518,
+    "rank": 12,
+    "count": 11410,
+    "per_million": 7007.0,
+    "token": "'','",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 279,
+    "rank": 13,
+    "count": 11380,
+    "per_million": 6988.6,
+    "token": "'\u2423the'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 997,
+    "rank": 14,
+    "count": 11217,
+    "per_million": 6888.5,
+    "token": "'):\n'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   }
+  ],
+  "demoted": [
+   {
+    "id": 94,
+    "rank": 100276,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xa1'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 96,
+    "rank": 100275,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xa3'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 97,
+    "rank": 100274,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xa4'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 98,
+    "rank": 100273,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xa5'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 99,
+    "rank": 100272,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xa6'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 107,
+    "rank": 100246,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xaf'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 109,
+    "rank": 100245,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xb1'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 110,
+    "rank": 100244,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xb2'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 114,
+    "rank": 100243,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xb6'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 115,
+    "rank": 100242,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xb7'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 116,
+    "rank": 100241,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xb8'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 117,
+    "rank": 100212,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xb9'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   }
+  ]
+ },
+ "hindi": {
+  "tokenizer": "o200k_base",
+  "promoted": [
+   {
+    "id": 2329,
+    "rank": 0,
+    "count": 15675,
+    "per_million": 23750.2,
+    "token": "'\u2423\u0915\u0947'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 1670,
+    "rank": 2,
+    "count": 12825,
+    "per_million": 19432.0,
+    "token": "'\u0964'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 3342,
+    "rank": 3,
+    "count": 12813,
+    "per_million": 19413.8,
+    "token": "'\u2423\u092e\u0947\u0902'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 2487,
+    "rank": 4,
+    "count": 11733,
+    "per_million": 17777.4,
+    "token": "'\u2423\u0939\u0948'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 220,
+    "rank": 5,
+    "count": 7786,
+    "per_million": 11797.1,
+    "token": "'\u2423'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 4042,
+    "rank": 6,
+    "count": 7756,
+    "per_million": 11751.6,
+    "token": "'\u2423\u0915\u0940'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 5034,
+    "rank": 7,
+    "count": 7129,
+    "per_million": 10801.6,
+    "token": "'\u2423\u0914\u0930'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 5957,
+    "rank": 8,
+    "count": 6749,
+    "per_million": 10225.8,
+    "token": "'\u2423\u0915\u093e'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 4291,
+    "rank": 9,
+    "count": 6156,
+    "per_million": 9327.3,
+    "token": "'\u2423\u0938\u0947'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 3824,
+    "rank": 10,
+    "count": 4823,
+    "per_million": 7307.6,
+    "token": "'\u094b\u0902'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 4045,
+    "rank": 11,
+    "count": 4664,
+    "per_million": 7066.7,
+    "token": "'\u2423\u0915\u094b'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   },
+   {
+    "id": 6374,
+    "rank": 12,
+    "count": 4643,
+    "per_million": 7034.9,
+    "token": "'\u2423\u0939\u0948\u0902'",
+    "bytes_before": 2,
+    "bytes_after": 1
+   }
+  ],
+  "demoted": [
+   {
+    "id": 2,
+    "rank": 200018,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "'#'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 31,
+    "rank": 200017,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "'@'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 48,
+    "rank": 199953,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "'Q'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 61,
+    "rank": 199921,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "'^'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 63,
+    "rank": 199920,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "'`'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 80,
+    "rank": 199889,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "'q'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 93,
+    "rank": 199873,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "'~'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 107,
+    "rank": 199857,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xaf'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 116,
+    "rank": 199825,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xb8'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 118,
+    "rank": 199824,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xba'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 124,
+    "rank": 199823,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xc0'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   },
+   {
+    "id": 125,
+    "rank": 199822,
+    "count": 0,
+    "per_million": 0.0,
+    "token": "b'\\xc1'",
+    "bytes_before": 1,
+    "bytes_after": 3
+   }
+  ]
+ }
+}
